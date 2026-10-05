@@ -163,3 +163,31 @@ test("CLI status accepts exact selectors and returns compact resolution", () => 
     notificationDelivery: "outside_bridge",
   });
 });
+
+test("status-only MCP denies every other tool even with send opt-in", async () => {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [resolve("dist/mcp.mjs")],
+    env: {
+      ORCA_BIN: resolve("test/fixtures/orca.mjs"),
+      ORCA_BRIDGE_STATUS_ONLY: "1",
+      ORCA_BRIDGE_ENABLE_SEND: "1",
+    },
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "status-only-test", version: "1.0.0" });
+  try {
+    await client.connect(transport);
+    expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["orca_status"]);
+    const result = await client.callTool({
+      name: "orca_status",
+      arguments: { repo: "sample", name: "review" },
+    });
+    expect(result.isError).not.toBe(true);
+    for (const name of ["orca_overview", "orca_task_logs", "orca_send_instruction"]) {
+      expect((await client.callTool({ name, arguments: {} })).isError).toBe(true);
+    }
+  } finally {
+    await client.close();
+  }
+});
