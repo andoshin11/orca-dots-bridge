@@ -2,7 +2,7 @@
 
 Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
 
-ターン終了・入力待ちの自動通知は未実装です。公式SDK 2.3.1による独立したMCP 2.0入口 `dist/mcp2.mjs` のstatus/sendは合成検証済みですが、稼働中の接続には未適用です。[MCP Events互換性検証](docs/mcp-events-compatibility.md)に、再現手順と移行条件を記載しています。
+ターン終了・入力待ちの通知コアは合成実装済みですが、実通知は未接続です。[通知コアの実装範囲](docs/notifications-design.md)を参照してください。公式SDK 2.3.1による独立したMCP 2.0入口 `dist/mcp2.mjs` のstatus/sendは合成検証済みですが、稼働中の接続には未適用です。[MCP Events互換性検証](docs/mcp-events-compatibility.md)に、再現手順と移行条件を記載しています。
 
 ## セットアップ
 
