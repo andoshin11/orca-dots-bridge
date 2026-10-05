@@ -6,6 +6,7 @@ args = ["/absolute/path/to/orca-dots-bridge/dist/mcp.mjs"]
 startup_timeout_sec = 10
 tool_timeout_sec = 180
 enabled_tools = [
+  "orca_status",
   "orca_overview",
   "orca_waiting",
   "orca_task_detail",

@@ -18,7 +18,7 @@ test("built CLI emits machine-readable result and fails unknown commands", () =>
     execFileSync(process.execPath, ["dist/cli.mjs", "send"], { env, stdio: "pipe" }),
   ).toThrow();
 });
-test("stdio MCP initializes, lists exactly five read-only tools, executes and reports validation errors", async () => {
+test("stdio MCP initializes, lists exactly six read-only tools, executes and reports validation errors", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
@@ -31,6 +31,7 @@ test("stdio MCP initializes, lists exactly five read-only tools, executes and re
     const listed = await client.listTools();
     expect(listed.tools.map((t) => t.name).sort()).toEqual([
       "orca_overview",
+      "orca_status",
       "orca_task_detail",
       "orca_task_logs",
       "orca_terminal_inspect",
@@ -41,6 +42,14 @@ test("stdio MCP initializes, lists exactly five read-only tools, executes and re
     expect(result.isError).not.toBe(true);
     const content = result.content as { type: string; text: string }[];
     expect(JSON.parse(content[0]!.text).items).toEqual([]);
+    const status = await client.callTool({
+      name: "orca_status",
+      arguments: { repo: "sample", name: "review" },
+    });
+    expect(status.isError).not.toBe(true);
+    expect(JSON.parse((status.content as { text: string }[])[0]!.text).resolution).toBe(
+      "not_found",
+    );
     const invalid = await client.callTool({
       name: "orca_task_logs",
       arguments: { handle: "term_1", limit: 10000 },
@@ -83,7 +92,7 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(6);
+    expect(tools).toHaveLength(7);
     expect(tools.find((t) => t.name === "orca_send_instruction")?.annotations).toMatchObject({
       readOnlyHint: false,
       idempotentHint: false,
@@ -126,5 +135,31 @@ test("built CLI inspect returns terminal and logs in one invocation", () => {
     scope: "single_terminal",
     terminal: { handle: "term_fixture", worktreeId: "w1" },
     log: { text: "synthetic output" },
+  });
+});
+
+test("CLI status accepts exact selectors and returns compact resolution", () => {
+  const env = { ...process.env, ORCA_BIN: resolve("test/fixtures/orca.mjs"), ORCA_ENVIRONMENT: "" };
+  const result = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "dist/cli.mjs",
+        "status",
+        "--repo",
+        "sample",
+        "--name",
+        "review",
+        "--branch",
+        "feature",
+        "--host-id",
+        "local",
+      ],
+      { env, encoding: "utf8" },
+    ),
+  );
+  expect(result.result).toMatchObject({
+    resolution: "not_found",
+    notificationDelivery: "outside_bridge",
   });
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { statusSchema } from "./status.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -29,6 +30,16 @@ const wrap = (method: (input: unknown) => Promise<unknown>) => async (input: unk
     };
   }
 };
+server.registerTool(
+  "orca_status",
+  {
+    description:
+      "One-call status by exact repo and workspace name; optional branch/hostId/id. Resolves fresh handles, returns compact agent states and bounded lead-candidate progress. Never assume null parent means main. Return this result promptly; no repeat discovery needed. No writes.",
+    inputSchema: statusSchema.shape,
+    annotations,
+  },
+  wrap((i) => bridge.status(i)),
+);
 server.registerTool(
   "orca_overview",
   {

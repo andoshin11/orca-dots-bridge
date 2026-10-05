@@ -30,6 +30,9 @@ Node CLI / MCP のビルドなので Vite+ の `vp pack` を使用します。`v
 ## 読み取り CLI
 
 ```sh
+# 指定タスクの進捗を1回で取得（完全一致）
+node dist/cli.mjs status --repo '<repo>' --name '<task name>' --branch '<branch>'
+
 # 概要。id は返された値をそのまま利用
 node dist/cli.mjs overview --limit 5
 node dist/cli.mjs overview --limit 5 --cursor '<nextCursor>'
@@ -47,6 +50,12 @@ node dist/cli.mjs logs --handle '<handle>' --limit 20 --max-chars 4000 --cursor 
 ```
 
 正常時は `{ "ok": true, "result": ... }`、失敗時は `{ "ok": false, "error": { "code", "message" } }` と終了コード1を返します。エラーにはraw stderrやOrcaのエラー本文を含めません。成功時のタスク・ログ出力には機密情報が含まれ得るため、出力をコミットしないでください。`ORCA_BIN=/absolute/path/to/orca` で実行ファイルを指定できます。実行ファイル指定は運用者の信頼済み設定であり、MCP引数から変更できません。
+
+## 名前を指定して素早く確認
+
+`status` / `orca_status` は一覧を新しく取得し、repoとnameの完全一致で状態を集計します。同名候補はbranch・hostId・idで絞ります。候補が曖昧なら端末を選びません。チーム端末が一意なら、その候補の短いログと待機情報を並列取得します。親情報の欠落だけではmainと判定しません。最大12agentの要約と12行・1600文字のログを返し、待機未評価件数を明示します。
+
+呼び出し側はこの結果を受け取ったら短く回答してタスクを終了してください。[即時応答の呼び出し手順と計測範囲](docs/quick-status.md)を参照してください。
 
 ## 特定済み端末を素早く確認
 
@@ -75,7 +84,7 @@ node dist/cli.mjs send --handle '<terminal handle>' --text '追加で確認し�
 
 呼び出し側は送信を短い単独タスクとして実行し、receiptを得たら直ちに受付結果を返してそのタスクを終了してください。性能調査・ログ追加取得・相手の完了待ちを同じ返信の前に続けないでください。CLIが返した時刻と、dot/音声へ通知できた時刻は別です。後続作業は受付結果を伝えた後の別依頼として行います。これはタスクの結果通知待ちによる遅れを減らす呼び出し方で、ブリッジが音声通知したことを保証するものではありません。
 
-MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り5ツールだけを許可します。
+MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り6ツールだけを許可します。
 
 ```sh
 ORCA_BRIDGE_ENABLE_SEND=1 node dist/mcp.mjs
@@ -103,7 +112,7 @@ stdio 対応MCPクライアントの一般的な設定例（未登録）:
 }
 ```
 
-Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り5つです。送信ツールは下記の明示有効化が必要です。
+Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_status`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り6つです。送信ツールは下記の明示有効化が必要です。
 
 公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。リモートHTTP MCPのみを受け付ける場合、このサーバーを直接接続できません。その場合は認証付きトランスポートの別設計が必要です。本実装はHTTPポートを開かず、インターネット公開や認証設定の作成を行いません。
 

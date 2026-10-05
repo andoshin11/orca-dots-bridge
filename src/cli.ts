@@ -3,7 +3,7 @@ import { BridgeError, errorResult } from "./errors.js";
 const [command, ...args] = process.argv.slice(2);
 if (command === "--help" || command === "help" || !command) {
   console.log(
-    "orca-dots-bridge <overview|waiting|detail|logs|inspect|send> [--limit N] [--cursor C] [--id WORKTREE_ID] [--handle TERMINAL_HANDLE] [--max-chars N] [--text TEXT] [--expected-worktree-id ID]\nJSON output. Set ORCA_BIN and optionally ORCA_ENVIRONMENT. send requires an explicit terminal handle and nonempty text. No automatic runtime startup.",
+    "orca-dots-bridge <status|overview|waiting|detail|logs|inspect|send> [--repo REPO --name NAME] [--branch BRANCH] [--host-id HOST] [--limit N] [--cursor C] [--id WORKTREE_ID] [--handle TERMINAL_HANDLE] [--max-chars N] [--text TEXT] [--expected-worktree-id ID]\nJSON output. Set ORCA_BIN and optionally ORCA_ENVIRONMENT. send requires an explicit terminal handle and nonempty text. No automatic runtime startup.",
   );
 } else {
   try {
@@ -16,6 +16,10 @@ if (command === "--help" || command === "help" || !command) {
         !key ||
         !value ||
         ![
+          "--repo",
+          "--name",
+          "--branch",
+          "--host-id",
           "--limit",
           "--cursor",
           "--id",
@@ -27,21 +31,23 @@ if (command === "--help" || command === "help" || !command) {
       )
         throw new BridgeError("invalid_input", "Unknown flag or missing value.");
       const name =
-        key === "--max-chars"
-          ? "maxChars"
-          : key === "--expected-worktree-id"
-            ? "expectedWorktreeId"
-            : key.slice(2);
+        key === "--host-id"
+          ? "hostId"
+          : key === "--max-chars"
+            ? "maxChars"
+            : key === "--expected-worktree-id"
+              ? "expectedWorktreeId"
+              : key.slice(2);
       if (name in options) throw new BridgeError("invalid_input", "Duplicate flag.");
       options[name] = ["limit", "maxChars"].includes(name) ? Number(value) : value;
     }
     const bridge = new Bridge();
-    if (!["overview", "waiting", "detail", "logs", "inspect", "send"].includes(command))
+    if (!["status", "overview", "waiting", "detail", "logs", "inspect", "send"].includes(command))
       throw new BridgeError("invalid_input", "Unknown command.");
     const result =
-      await bridge[command as "overview" | "waiting" | "detail" | "logs" | "inspect" | "send"](
-        options,
-      );
+      await bridge[
+        command as "status" | "overview" | "waiting" | "detail" | "logs" | "inspect" | "send"
+      ](options);
     console.log(serialize({ ok: true, result }));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, error: errorResult(e) }));

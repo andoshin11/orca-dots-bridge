@@ -1,3 +1,4 @@
+import { taskStatus } from "./status.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { OrcaAdapter } from "./adapter.js";
@@ -89,6 +90,9 @@ export class Bridge {
     private adapter = new OrcaAdapter(),
     private now = () => Date.now(),
   ) {}
+  status(input: unknown) {
+    return taskStatus(this.adapter, input, this.now);
+  }
   private async inventory() {
     const [ps, terms] = await Promise.all([this.adapter.ps(), this.adapter.terminals()]);
     const worktrees = ps.worktrees
