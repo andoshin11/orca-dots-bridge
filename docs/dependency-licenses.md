@@ -6,7 +6,11 @@ Gitで追跡するソース・設定・lockfile・ドキュメントが対象で
 
 現行のVite+ pack出力のimportとsource mapを確認しました。MCP SDKとZodは外部importのままで、mapのsourcesはすべて`src/`のプロジェクトファイルでした。現在の生成物には依存実装の取り込みは確認されていません。バンドル設定を変えた場合は再確認してください。
 
-## 実際に確認した資料
+## MCP 2.0入口追加時の確認
+
+公式server/client/core 2.3.1のpackage宣言とLICENSEを確認しました。serverはruntime、clientはtest用途です。MCP v2のLICENSEはApache-2.0と未移行MIT contributionsの説明を含みます。[通知本文](../THIRD_PARTY_NOTICES.md)を追加しました。以下の依存件数はv2追加前の監査記録であり、更新後lockfile全体の再監査を意味しません。
+
+## v2追加前に確認した資料
 
 package-lock.jsonの281依存エントリーにはライセンス宣言があります。現在の環境に存在する187パッケージのうち、174件でパッケージ直下のLICENSE・COPYING・NOTICE類を確認しました。合計176文書を走査し、直接依存の本文、runtimeのBSD条件、Apache-2.0・MPL-2.0の配布条項、ツールの同梱通知を確認しました。runtime扱いの94件すべてに本文ファイルがありました。これは宣言とインストール済み資料の確認であり、すべてのコードの権利関係を保証するものではありません。
 
@@ -45,4 +49,4 @@ runtimeの推移依存にはMIT・ISCのほか、fast-uriとqsのBSD-3-Clause、
 - yuku-codegen
 - yuku-parser
 
-この記録は現行lockfileとローカル生成物の技術的な確認です。依存・対象プラットフォーム・配布形式の変更時は更新してください。
+この記録は各確認時点のlockfileとローカル生成物の技術的な確認です。依存・対象プラットフォーム・配布形式の変更時は更新してください。

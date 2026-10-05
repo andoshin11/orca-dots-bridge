@@ -272,3 +272,80 @@ test("status-send needs send opt-in and status-only remains the strongest restri
     }
   }
 });
+
+test("MCP 2.0 entry negotiates modern and legacy protocols with safe status/send boundaries", async () => {
+  const { Client: ModernClient } = await import("@modelcontextprotocol/client");
+  const { StdioClientTransport: ModernTransport } =
+    await import("@modelcontextprotocol/client/stdio");
+  for (const modern of [true, false]) {
+    for (const profile of ["status", "send", "status-only-wins"]) {
+      const transport = new ModernTransport({
+        command: process.execPath,
+        args: [resolve("dist/mcp2.mjs")],
+        env: {
+          ORCA_BIN: resolve("test/fixtures/orca.mjs"),
+          ORCA_BRIDGE_ENABLE_SEND: profile === "status" ? "0" : "1",
+          ORCA_BRIDGE_STATUS_ONLY: profile === "status-only-wins" ? "1" : "0",
+        },
+        stderr: "pipe",
+      });
+      const client = new ModernClient(
+        { name: "synthetic-mcp2-test", version: "1" },
+        {
+          versionNegotiation: { mode: modern ? { pin: "2026-07-28" } : "legacy" },
+        },
+      );
+      try {
+        await client.connect(transport);
+        expect(client.getProtocolEra()).toBe(modern ? "modern" : "legacy");
+        expect(client.getServerCapabilities()).not.toHaveProperty("events");
+        const listed = await client.listTools();
+        expect(listed.tools.map((t) => t.name).sort()).toEqual(
+          profile === "send" ? ["orca_send_instruction", "orca_status"] : ["orca_status"],
+        );
+        const status = await client.callTool({
+          name: "orca_status",
+          arguments: { repo: "synthetic", name: "synthetic" },
+        });
+        expect(status.isError).not.toBe(true);
+        expect(JSON.parse((status.content as { text: string }[])[0]!.text).resolution).toBe(
+          "not_found",
+        );
+        if (profile === "send") {
+          const send = listed.tools.find((t) => t.name === "orca_send_instruction")!;
+          expect(send.annotations).toMatchObject({ readOnlyHint: false, idempotentHint: false });
+          expect(send.inputSchema.required).toContain("expectedWorktreeId");
+          for (const args of [
+            { handle: "term_fixture", text: "synthetic" },
+            { handle: "all", text: "synthetic", expectedWorktreeId: "w1" },
+            { handle: "term_fixture", text: "synthetic", expectedWorktreeId: "wrong" },
+            { handle: "term_fixture", text: "--stop", expectedWorktreeId: "w1" },
+            { handle: "term_fixture", text: "synthetic", expectedWorktreeId: "w1", stop: true },
+          ]) {
+            const invalid = await client.callTool({
+              name: "orca_send_instruction",
+              arguments: args,
+            });
+            expect(invalid.isError).toBe(true);
+          }
+          const sent = await client.callTool({
+            name: "orca_send_instruction",
+            arguments: {
+              handle: "term_fixture",
+              expectedWorktreeId: "w1",
+              text: "synthetic instruction",
+            },
+          });
+          expect(sent.isError).not.toBe(true);
+          expect(JSON.parse((sent.content as { text: string }[])[0]!.text)).toMatchObject({
+            accepted: true,
+            completion: "not_observed",
+            retrySafe: false,
+          });
+        }
+      } finally {
+        await client.close();
+      }
+    }
+  }
+}, 20000);

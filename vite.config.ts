@@ -8,7 +8,7 @@ export default defineConfig({
     },
   },
   pack: {
-    entry: ["src/cli.ts", "src/mcp.ts"],
+    entry: ["src/cli.ts", "src/mcp.ts", "src/mcp2.ts"],
     format: ["esm"],
     platform: "node",
     target: "node22",
