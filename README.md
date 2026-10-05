@@ -174,3 +174,5 @@ ORCA_ENVIRONMENT='<saved-environment-name>' node dist/cli.mjs overview --limit 5
 ## ライセンス
 
 本プロジェクトは[MIT License](LICENSE)で提供します。依存パッケージには、それぞれのライセンスが適用されます。
+
+直接依存の通知は[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)、本文の確認範囲と依存同梱時の注意は[依存ライセンス確認](docs/dependency-licenses.md)を参照してください。現在の公開対象はソースで、依存コードを含むバイナリ配布の完全なライセンス確認は行っていません。
