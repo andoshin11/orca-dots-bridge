@@ -19,6 +19,17 @@ else if (verb === "terminal show" && handle === "term_fixture")
       agentIdentity: "codex",
     },
   };
+else if (verb === "terminal read" && handle === "term_fixture")
+  result = {
+    terminal: {
+      handle,
+      status: "running",
+      tail: ["synthetic output"],
+      truncated: false,
+      nextCursor: "1",
+      source: "stream",
+    },
+  };
 else if (verb === "terminal send" && handle === "term_fixture") {
   const accepted = text !== "refuse";
   result = {

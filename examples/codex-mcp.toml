@@ -5,7 +5,13 @@ command = "/absolute/path/to/node"
 args = ["/absolute/path/to/orca-dots-bridge/dist/mcp.mjs"]
 startup_timeout_sec = 10
 tool_timeout_sec = 180
-enabled_tools = ["orca_overview", "orca_waiting", "orca_task_detail", "orca_task_logs"]
+enabled_tools = [
+  "orca_overview",
+  "orca_waiting",
+  "orca_task_detail",
+  "orca_task_logs",
+  "orca_terminal_inspect",
+]
 
 [mcp_servers.orca-readonly.env]
 ORCA_BIN = "/usr/local/bin/orca"

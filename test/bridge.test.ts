@@ -233,3 +233,62 @@ test("missing CLI, failed process, timeout and byte cap are distinct", async () 
     )(["-e", 'console.log("x".repeat(10000))', "--"]),
   ).rejects.toMatchObject({ code: "output_limit" });
 });
+
+test("inspect fetches only exact terminal metadata and bounded logs concurrently", async () => {
+  const calls: string[][] = [];
+  let releaseShow: () => void = () => {};
+  const heldShow = new Promise<void>((resolve) => {
+    releaseShow = resolve;
+  });
+  const adapter = new OrcaAdapter(async (args) => {
+    calls.push(args);
+    if (args[1] === "show") {
+      await heldShow;
+      return envelope({ terminal: { ...terminal, agentWait: null } });
+    }
+    if (args[1] === "read") {
+      releaseShow();
+      return envelope({
+        terminal: {
+          handle: "term_1",
+          status: "running",
+          tail: ["x".repeat(300)],
+          truncated: false,
+          nextCursor: "1",
+          source: "screen",
+        },
+      });
+    }
+    throw new Error("Unexpected fleet discovery");
+  });
+  const result = await new Bridge(adapter).inspect({
+    handle: "term_1",
+    expectedWorktreeId: "w1",
+    limit: 2,
+    maxChars: 100,
+  });
+  expect(calls.map((c) => c.slice(0, 2).join(" ")).sort()).toEqual([
+    "terminal read",
+    "terminal show",
+  ]);
+  expect(result.terminal.waitEvaluated).toBe(true);
+  expect(result.log.text).toHaveLength(100);
+  expect(result.log.outputClipped).toBe(true);
+  expect(result.scope).toBe("single_terminal");
+});
+test("inspect rejects stale worktree identity and mismatched log handles", async () => {
+  await expect(
+    fixture().bridge.inspect({ handle: "term_1", expectedWorktreeId: "wrong" }),
+  ).rejects.toMatchObject({ code: "target_mismatch" });
+  await expect(
+    fixture({
+      log: {
+        handle: "term_other",
+        status: "running",
+        tail: [],
+        truncated: false,
+        nextCursor: null,
+      },
+    }).bridge.inspect({ handle: "term_1" }),
+  ).rejects.toMatchObject({ code: "target_mismatch" });
+});

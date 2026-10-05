@@ -18,7 +18,7 @@ test("built CLI emits machine-readable result and fails unknown commands", () =>
     execFileSync(process.execPath, ["dist/cli.mjs", "send"], { env, stdio: "pipe" }),
   ).toThrow();
 });
-test("stdio MCP initializes, lists exactly four read-only tools, executes and reports validation errors", async () => {
+test("stdio MCP initializes, lists exactly five read-only tools, executes and reports validation errors", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
@@ -33,6 +33,7 @@ test("stdio MCP initializes, lists exactly four read-only tools, executes and re
       "orca_overview",
       "orca_task_detail",
       "orca_task_logs",
+      "orca_terminal_inspect",
       "orca_waiting",
     ]);
     expect(listed.tools.every((t) => t.annotations?.readOnlyHint)).toBe(true);
@@ -82,7 +83,7 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(5);
+    expect(tools).toHaveLength(6);
     expect(tools.find((t) => t.name === "orca_send_instruction")?.annotations).toMatchObject({
       readOnlyHint: false,
       idempotentHint: false,
@@ -101,4 +102,29 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
   } finally {
     await client.close();
   }
+});
+
+test("built CLI inspect returns terminal and logs in one invocation", () => {
+  const env = { ...process.env, ORCA_BIN: resolve("test/fixtures/orca.mjs"), ORCA_ENVIRONMENT: "" };
+  const result = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "dist/cli.mjs",
+        "inspect",
+        "--handle",
+        "term_fixture",
+        "--expected-worktree-id",
+        "w1",
+        "--limit",
+        "2",
+      ],
+      { env, encoding: "utf8" },
+    ),
+  );
+  expect(result.result).toMatchObject({
+    scope: "single_terminal",
+    terminal: { handle: "term_fixture", worktreeId: "w1" },
+    log: { text: "synthetic output" },
+  });
 });

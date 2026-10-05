@@ -93,6 +93,10 @@ test("instruction is one literal argv value, submitted once, with no interrupt o
     retrySafe: false,
   });
   expect(JSON.stringify(result)).not.toContain(text);
+  expect(result.notificationDelivery).toBe("outside_bridge");
+  expect(result.timingsMs.preflight).toBeGreaterThanOrEqual(0);
+  expect(result.timingsMs.sendReceipt).toBeGreaterThanOrEqual(0);
+  expect(result.timingsMs.total).toBeGreaterThanOrEqual(result.timingsMs.preflight);
 });
 test("turn start, refusal and legacy missing receipt never claim completion", async () => {
   for (const [response, expected] of [

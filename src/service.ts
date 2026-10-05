@@ -24,6 +24,7 @@ export const logsSchema = z
   })
   .strict();
 
+export const inspectSchema = logsSchema.extend({ expectedWorktreeId: identifier.optional() });
 export const sendSchema = z
   .object({
     handle: z
@@ -256,8 +257,46 @@ export class Bridge {
     };
   }
 
+  async inspect(input: unknown) {
+    const { expectedWorktreeId, ...options } = parse(inspectSchema, input);
+    // Known handles need no fleet discovery. Both bounded reads are fresh and independent.
+    const [terminal, log] = await Promise.all([
+      this.adapter.show(options.handle),
+      this.logs(options),
+    ]);
+    if (
+      terminal.handle !== options.handle ||
+      (expectedWorktreeId !== undefined && terminal.worktreeId !== expectedWorktreeId)
+    ) {
+      throw new BridgeError(
+        "target_mismatch",
+        "Terminal identity changed; rediscover the target before interpreting output.",
+      );
+    }
+    return {
+      fetchedAt: new Date(this.now()).toISOString(),
+      scope: "single_terminal",
+      terminal: {
+        ...terminal,
+        title: clip(terminal.title, 200),
+        agentWait: terminal.agentWait
+          ? {
+              source: clip(terminal.agentWait.source, 80),
+              reason: clip(terminal.agentWait.reason, 160),
+              since: terminal.agentWait.since ?? null,
+            }
+          : null,
+        waitEvaluated: terminal.agentWait !== undefined,
+      },
+      log,
+      observation:
+        "Terminal state and output are parallel fresh reads, not an atomic snapshot. Agent state and fleet coverage require overview/detail.",
+    };
+  }
   async send(input: unknown) {
     const { handle, text } = parse(sendSchema, input);
+    const startedAt = new Date(this.now()).toISOString();
+    const start = performance.now();
     // Read exact target immediately before sending. Never select current/active/all.
     const target = await this.adapter.show(handle);
     if (
@@ -272,6 +311,7 @@ export class Bridge {
         "Exact target must be connected, writable, and identified as an agent; no input was sent.",
       );
     }
+    const beforeSend = performance.now();
     let result;
     try {
       result = await this.adapter.send(handle, text);
@@ -286,7 +326,14 @@ export class Bridge {
       );
     }
     return {
+      startedAt,
       observedAt: new Date(this.now()).toISOString(),
+      timingsMs: {
+        preflight: Math.round(beforeSend - start),
+        sendReceipt: Math.round(performance.now() - beforeSend),
+        total: Math.round(performance.now() - start),
+      },
+      notificationDelivery: "outside_bridge",
       handle,
       accepted: result.accepted,
       delivery: result.accepted ? "accepted" : "refused",
@@ -308,6 +355,7 @@ export class Bridge {
   async logs(input: unknown) {
     const o = parse(logsSchema, input);
     const log = await this.adapter.logs(o.handle, o.limit, o.cursor);
+    if (log.handle !== o.handle) throw new BridgeError("target_mismatch", "Unexpected log target.");
     // A huge individual line is bounded too. Report exactly when the upstream cursor skips clipped text.
     const all = log.tail.slice(0, o.limit).join("\n");
     const tail = all.slice(0, o.maxChars);

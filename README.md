@@ -48,6 +48,16 @@ node dist/cli.mjs logs --handle '<handle>' --limit 20 --max-chars 4000 --cursor 
 
 正常時は `{ "ok": true, "result": ... }`、失敗時は `{ "ok": false, "error": { "code", "message" } }` と終了コード1を返します。エラーにはraw stderrやOrcaのエラー本文を含めません。成功時のタスク・ログ出力には機密情報が含まれ得るため、出力をコミットしないでください。`ORCA_BIN=/absolute/path/to/orca` で実行ファイルを指定できます。実行ファイル指定は運用者の信頼済み設定であり、MCP引数から変更できません。
 
+## 特定済み端末を素早く確認
+
+対象handleが既知なら、全体の再探索をせずに `inspect` を使えます。端末メタデータと上限付きログを並列に読み、1回のCLI/MCP呼び出しで返します。キャッシュは使いません。
+
+```sh
+node dist/cli.mjs inspect --handle '<terminal handle>' --expected-worktree-id '<known worktree id>' --limit 20 --max-chars 2000
+```
+
+MCPでは `orca_terminal_inspect` に同じ引数（expectedWorktreeIdは任意）を渡します。ワークツリー一致に失敗したら再探索してください。結果はscope=single_terminalで、ワークツリー内の全agent状態やfleet集計は含みません。全体確認はoverview/detail、特定済みセッションの追跡はinspectと使い分けます。並列取得は同一時点の原子的なsnapshotではありません。
+
 ## 1端末への追加指示
 
 ユーザーが指定した対象と本文がある場合だけ実行してください。detailで返された正確なterminal handleを使います。ワークツリーID・paneKey・current・allは送信対象として受け付けません。
@@ -60,10 +70,12 @@ node dist/cli.mjs send --handle '<terminal handle>' --text '追加で確認し�
 - 直前に同じhandleをshowで読み、connected・writable・agentIdentityが確認できた対象だけに送ります。旧ホストでこれらを検証できない場合も送信しません。
 - 呼び出しは `terminal send --terminal <handle> --text <text> --enter` の1回のみ。shellを使わず本文を1引数として渡します。interrupt・retry・bulkオプションはありません。
 - `accepted` / `delivery` は入力受付・拒否、`turnStarted` はOrcaがターン開始を観測したかを示します。**どちらもタスクの完了ではなく、completionは常にnot_observedです。** 受付拒否も構造化結果として返ります。
-- 送信後のタイムアウト・切断・不正なreceiptは `send_outcome_unknown` です。受付済みの可能性があるため、自動で再送しないでください。retrySafeはfalseです。本文は結果に含めませんが、CLIプロセスの引数としてOSから見えるため秘密情報を本文に入れないでください。
+- 送信後のタイムアウト・切断・不正なreceiptは `send_outcome_unknown` です。受付済みの可能性があるため、自動で再送しないでください。retrySafeはfalseです。startedAt・observedAt・timingsMsで事前確認と受付までの時間を区別します。notificationDelivery=outside_bridgeは、会話への結果通知がブリッジ外の処理であることを表します。本文は結果に含めませんが、CLIプロセスの引数としてOSから見えるため秘密情報を本文に入れないでください。
 - preflightと送信は単一トランザクションではありません。実行時のagentへの配送判定はOrcaに委ねます。返された観測がunsupportedならターン開始を保証しません。
 
-MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り4ツールだけを許可します。
+呼び出し側は送信を短い単独タスクとして実行し、receiptを得たら直ちに受付結果を返してそのタスクを終了してください。性能調査・ログ追加取得・相手の完了待ちを同じ返信の前に続けないでください。CLIが返した時刻と、dot/音声へ通知できた時刻は別です。後続作業は受付結果を伝えた後の別依頼として行います。これはタスクの結果通知待ちによる遅れを減らす呼び出し方で、ブリッジが音声通知したことを保証するものではありません。
+
+MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り5ツールだけを許可します。
 
 ```sh
 ORCA_BRIDGE_ENABLE_SEND=1 node dist/mcp.mjs
@@ -91,7 +103,7 @@ stdio 対応MCPクライアントの一般的な設定例（未登録）:
 }
 ```
 
-Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs` の読み取り4つです。送信ツールは下記の明示有効化が必要です。
+Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り5つです。送信ツールは下記の明示有効化が必要です。
 
 公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。リモートHTTP MCPのみを受け付ける場合、このサーバーを直接接続できません。その場合は認証付きトランスポートの別設計が必要です。本実装はHTTPポートを開かず、インターネット公開や認証設定の作成を行いません。
 

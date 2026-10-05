@@ -36,6 +36,7 @@ try {
     "orca_overview",
     "orca_task_detail",
     "orca_task_logs",
+    "orca_terminal_inspect",
     "orca_waiting",
   ]);
   assert(tools.every((t) => t.annotations?.readOnlyHint));
