@@ -1,0 +1,13 @@
+# INACTIVE example. No user/project MCP configuration has been modified.
+# Replace placeholder paths with local absolute paths before use.
+[mcp_servers.orca-readonly]
+command = "/absolute/path/to/node"
+args = ["/absolute/path/to/orca-dots-bridge/dist/mcp.mjs"]
+startup_timeout_sec = 10
+tool_timeout_sec = 180
+enabled_tools = ["orca_overview", "orca_waiting", "orca_task_detail", "orca_task_logs"]
+
+[mcp_servers.orca-readonly.env]
+ORCA_BIN = "/usr/local/bin/orca"
+ORCA_ENVIRONMENT = ""
+ORCA_PAIRING_CODE = ""

@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.vite/
+.local/
+.env
+.env.*
+!.env.example
+.npmrc
+.mcp.json
+.codex/config.toml
+*.log
+*.pem
+*.key
+.DS_Store

@@ -1,0 +1,33 @@
+{
+  "name": "orca-dots-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Orca visibility and explicit single-agent instruction bridge",
+  "type": "module",
+  "scripts": {
+    "build": "vp pack",
+    "check": "vp check",
+    "lint": "vp lint",
+    "format": "vp fmt",
+    "format:check": "vp fmt --check",
+    "typecheck": "tsc --noEmit",
+    "test": "vp test",
+    "verify": "vp run verify-all",
+    "start": "node dist/cli.mjs",
+    "mcp": "node dist/mcp.mjs",
+    "verify:local": "node scripts/verify-local.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@types/node": "22.19.15",
+    "typescript": "5.9.3",
+    "vite-plus": "1.0.0"
+  },
+  "engines": {
+    "node": "^22.18.0 || ^24.11.0 || >=26.0.0"
+  },
+  "packageManager": "npm@11.19.0"
+}
