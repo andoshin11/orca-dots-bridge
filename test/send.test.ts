@@ -156,3 +156,27 @@ test("nonzero Orca refusal preserves the explicit refused receipt", async () => 
   const result = await adapter.send("term_fixture", "refuse");
   expect(result).toMatchObject({ accepted: false, refusedReason: "permission", bytesWritten: 0 });
 });
+
+test("send checks the expected worktree before any mutation", async () => {
+  const denied = fixture();
+  await expect(
+    denied.bridge.send({ handle: "term_fixture", text: "test", expectedWorktreeId: "other" }),
+  ).rejects.toMatchObject({ code: "send_target_unavailable" });
+  expect(denied.calls).toHaveLength(1);
+  expect(denied.calls[0]?.[1]).toBe("show");
+  const allowed = fixture();
+  expect(
+    await allowed.bridge.send({ handle: "term_fixture", text: "test", expectedWorktreeId: "w1" }),
+  ).toMatchObject({ accepted: true, completion: "not_observed", retrySafe: false });
+  expect(allowed.calls.filter((a) => a[1] === "send")).toHaveLength(1);
+});
+
+test("send never resolves names or accepts bulk/stop selectors", async () => {
+  const f = fixture();
+  for (const extra of [{ repo: "sample", name: "review" }, { stop: true }, { bulk: true }]) {
+    await expect(
+      f.bridge.send({ handle: "term_fixture", text: "test", ...extra }),
+    ).rejects.toMatchObject({ code: "invalid_input" });
+  }
+  expect(f.calls).toHaveLength(0);
+});

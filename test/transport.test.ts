@@ -191,3 +191,84 @@ test("status-only MCP denies every other tool even with send opt-in", async () =
     await client.close();
   }
 });
+
+test("status-send exposes exactly two tools and requires an exact worktree for writes", async () => {
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [resolve("dist/mcp.mjs")],
+    env: {
+      ORCA_BIN: resolve("test/fixtures/orca.mjs"),
+      ORCA_BRIDGE_TOOLSET: "status-send",
+      ORCA_BRIDGE_ENABLE_SEND: "1",
+    },
+    stderr: "pipe",
+  });
+  const client = new Client({ name: "limited-send-test", version: "1.0.0" });
+  try {
+    await client.connect(transport);
+    const tools = (await client.listTools()).tools;
+    expect(tools.map((t) => t.name).sort()).toEqual(["orca_send_instruction", "orca_status"]);
+    expect(tools.find((t) => t.name === "orca_send_instruction")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+    });
+    for (const args of [
+      { handle: "term_fixture", text: "test" },
+      { handle: "term_fixture", text: "test", expectedWorktreeId: "other" },
+    ]) {
+      expect(
+        (await client.callTool({ name: "orca_send_instruction", arguments: args })).isError,
+      ).toBe(true);
+    }
+    const sent = await client.callTool({
+      name: "orca_send_instruction",
+      arguments: {
+        handle: "term_fixture",
+        text: "synthetic instruction",
+        expectedWorktreeId: "w1",
+      },
+    });
+    expect(sent.isError).not.toBe(true);
+    expect(JSON.parse((sent.content as { text: string }[])[0]!.text)).toMatchObject({
+      accepted: true,
+      completion: "not_observed",
+      retrySafe: false,
+    });
+    expect(
+      (await client.callTool({ name: "orca_task_logs", arguments: { handle: "term_fixture" } }))
+        .isError,
+    ).toBe(true);
+  } finally {
+    await client.close();
+  }
+});
+
+test("status-send needs send opt-in and status-only remains the strongest restriction", async () => {
+  for (const overrides of [
+    {},
+    { ORCA_BRIDGE_STATUS_ONLY: "1", ORCA_BRIDGE_ENABLE_SEND: "1" },
+  ] as Record<string, string>[]) {
+    const transport = new StdioClientTransport({
+      command: process.execPath,
+      args: [resolve("dist/mcp.mjs")],
+      env: { ORCA_BRIDGE_TOOLSET: "status-send", ...overrides },
+      stderr: "pipe",
+    });
+    const client = new Client({ name: "opt-in-test", version: "1.0.0" });
+    try {
+      await client.connect(transport);
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["orca_status"]);
+      expect(
+        (
+          await client.callTool({
+            name: "orca_send_instruction",
+            arguments: { handle: "term_fixture", expectedWorktreeId: "w1", text: "test" },
+          })
+        ).isError,
+      ).toBe(true);
+    } finally {
+      await client.close();
+    }
+  }
+});

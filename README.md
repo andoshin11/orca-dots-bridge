@@ -162,6 +162,31 @@ Tunnelがreadyになったら、個人ChatGPTのプラグイン追加から「�
 
 個人用プラグインからdotが子タスクを作らず `orca_status` を直接呼べることを一度検証しました。接続状態や各環境のツール提供範囲によって結果は変わります。タスク名・workspace/Tunnel ID・個人パス・実ログ・秘密情報は公開検証資料に含めていません。
 
+## Tunnelでstatusと単一送信だけを公開する（明示承認後）
+
+読み取り専用接続へ送信機能を追加する場合、実際に公開する前に利用者の承認が必要です。承認対象は `orca_send_instruction` による指定端末1つへの指定本文の送信です。対象を誤るとエージェントの作業方針が変わる可能性があります。停止・再送・一括操作は提供しません。新しい公開設定は次の2つを同時に指定します。
+
+```sh
+ORCA_BRIDGE_TOOLSET=status-send ORCA_BRIDGE_ENABLE_SEND=1 node /absolute/path/to/orca-dots-bridge/dist/mcp.mjs
+```
+
+このモードの公開ツールは `orca_status` と `orca_send_instruction` だけです。送信opt-inがなければstatusだけです。`ORCA_BRIDGE_STATUS_ONLY=1` は常に優先され、残っている間は送信できません。不正なtoolset名ではサーバーを起動しません。
+
+送信ツールの引数は `handle`、`expectedWorktreeId`、`text` の3つが必須です。正確なhandleとworktree IDが既に分かっていれば、再探索や子タスクへの委任なしに1回のツール呼び出しで事前確認と送信receiptを返します。サーバーは直前のterminal showでhandle・worktree ID・接続・書込み可否・agent識別を検証してから、terminal sendを1回だけ実行します。CLIおよび従来のfullモードでもexpectedWorktreeIdを任意で指定できます。
+
+対象が未確定なら先にstatusでrepo/nameを完全一致させます。複数候補ならid等で絞り直し、複数agentならユーザーが意図するhandleを確定します。roleやnull parentから送信先を推測しません。送信APIはrepo/name自体を受け付けず、曖昧な名前から自動送信する経路はありません。statusの返却範囲に必要なhandleがなければ、対象情報を別途確認するまで送信しません。
+
+本文上限や制御文字の検証は既存sendと共通です。receiptは受付であって完了ではなく、`completion=not_observed`・`retrySafe=false`を返します。タイムアウト等で結果不明なら、読み取りで確認して自動再送しません。送信ツールは `readOnlyHint=false`・`destructiveHint=true`・`idempotentHint=false` として公開します。ツール側でユーザーの承認を証明する仕組みはないため、呼び出し側は明示された対象・本文を必須にしてください。
+
+安全な切替手順:
+
+1. 上記の追加ツール・操作範囲を承認してから、既存profileを上書きせず別のローカルprofileを準備します。MCP commandのstatus-only設定を外し、toolsetとsend opt-inへ置き換えます。キーをbridge子プロセスへ渡さない設定は維持します。
+2. 利用者が現在のforegroundクライアントをCtrl+Cで止め、同じTunnelに対して新profileをキーの非表示入力から手動起動します。同一Tunnelに二重起動しません。runtimeキーのTunnels権限を追加で広げる手順ではありません。
+3. health/readyを確認してからChatGPT側で既存プラグインのツール情報を更新し、Readがstatus、変更ツールがsendの2件だけであることを確認します。UIによって再接続や再作成が必要なら、その実際の操作を確認してから進めます。
+4. 最初の実送信は、ユーザーが具体的な対象と本文を指定した時だけ行います。実エージェントへの疎通目的の試験送信はしません。切り戻す場合は利用者が停止後に元のstatus-only profileで起動し、プラグイン表示も再確認します。
+
+このモードの検証は合成fixtureのみです。新しいモードの実送信・接続済みプラグインの送信権限拡張は、コードの導入だけでは実施されません。
+
 ## ローカルruntimeと任意のリモート接続
 
 Orca 1.4.220のローカルruntimeで、CLIとMCP SDKクライアントから4機能の実読み取りを検証しています。実測の時刻・件数・端末情報はリポジトリに含めません。同じコンピューター上で利用する場合、リモートpairingは不要です。

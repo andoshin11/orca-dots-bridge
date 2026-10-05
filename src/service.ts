@@ -28,6 +28,7 @@ export const logsSchema = z
 export const inspectSchema = logsSchema.extend({ expectedWorktreeId: identifier.optional() });
 export const sendSchema = z
   .object({
+    expectedWorktreeId: identifier.optional(),
     handle: z
       .string()
       .regex(/^term_[a-zA-Z0-9_-]+$/)
@@ -298,13 +299,14 @@ export class Bridge {
     };
   }
   async send(input: unknown) {
-    const { handle, text } = parse(sendSchema, input);
+    const { handle, text, expectedWorktreeId } = parse(sendSchema, input);
     const startedAt = new Date(this.now()).toISOString();
     const start = performance.now();
     // Read exact target immediately before sending. Never select current/active/all.
     const target = await this.adapter.show(handle);
     if (
       target.handle !== handle ||
+      (expectedWorktreeId !== undefined && target.worktreeId !== expectedWorktreeId) ||
       !target.connected ||
       target.writable !== true ||
       !target.agentIdentity ||

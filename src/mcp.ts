@@ -14,6 +14,14 @@ import {
 import { errorResult } from "./errors.js";
 const server = new McpServer({ name: "orca-dots-bridge", version: "0.1.0" });
 const bridge = new Bridge();
+const statusOnly = process.env.ORCA_BRIDGE_STATUS_ONLY === "1";
+const toolset = process.env.ORCA_BRIDGE_TOOLSET ?? "full";
+if (!["full", "status-send"].includes(toolset)) {
+  throw new Error("Invalid ORCA_BRIDGE_TOOLSET; server was not started.");
+}
+const sendEnabled = !statusOnly && process.env.ORCA_BRIDGE_ENABLE_SEND === "1";
+const exposedSendSchema =
+  toolset === "status-send" ? sendSchema.required({ expectedWorktreeId: true }) : sendSchema;
 const annotations = {
   readOnlyHint: true,
   destructiveHint: false,
@@ -40,7 +48,7 @@ server.registerTool(
   },
   wrap((i) => bridge.status(i)),
 );
-if (process.env.ORCA_BRIDGE_STATUS_ONLY !== "1") {
+if (!statusOnly && toolset === "full") {
   server.registerTool(
     "orca_overview",
     {
@@ -92,24 +100,23 @@ if (process.env.ORCA_BRIDGE_STATUS_ONLY !== "1") {
     },
     wrap((i) => bridge.inspect(i)),
   );
-
-  // Explicit operator opt-in keeps existing read-only MCP clients read-only.
-  if (process.env.ORCA_BRIDGE_ENABLE_SEND === "1") {
-    server.registerTool(
-      "orca_send_instruction",
-      {
-        description:
-          "Send the user's explicit additional instruction to one exact runtime-issued terminal handle. Requires identified writable agent. No broadcast or retry. Acceptance/turn start is not task completion. On unknown outcome inspect instead of resending.",
-        inputSchema: sendSchema.shape,
-        annotations: {
-          readOnlyHint: false,
-          destructiveHint: true,
-          idempotentHint: false,
-          openWorldHint: true,
-        },
+}
+// Explicit operator opt-in keeps existing read-only MCP clients read-only.
+if (sendEnabled) {
+  server.registerTool(
+    "orca_send_instruction",
+    {
+      description:
+        "Send the user's explicit additional instruction to one exact runtime-issued terminal handle. Requires identified writable agent and expectedWorktreeId in status-send mode. Use status to resolve an exact worktree and handle; ambiguous repo/name or multiple agents require explicit target selection. Never guess the main agent. No broadcast or retry. Acceptance/turn start is not task completion. On unknown outcome inspect instead of resending.",
+      inputSchema: exposedSendSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
       },
-      wrap((i) => bridge.send(i)),
-    );
-  }
+    },
+    wrap((i) => bridge.send(exposedSendSchema.parse(i))),
+  );
 }
 await server.connect(new StdioServerTransport());
