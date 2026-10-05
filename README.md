@@ -170,3 +170,7 @@ ORCA_ENVIRONMENT='<saved-environment-name>' node dist/cli.mjs overview --limit 5
 - [Vite+ test](https://viteplus.dev/guide/test)
 
 上流mainは変化するため、互換性の根拠はドキュメントだけでなくローカル1.4.220の実測JSONです。実データのログや認証情報はfixtureに保存していません。
+
+## ライセンス
+
+本プロジェクトは[MIT License](LICENSE)で提供します。依存パッケージには、それぞれのライセンスが適用されます。
