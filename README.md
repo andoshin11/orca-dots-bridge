@@ -2,7 +2,9 @@
 
 Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
 
-ターン終了・入力待ちの通知コアは合成実装済みですが、実通知は未接続です。[通知コアの実装範囲](docs/notifications-design.md)を参照してください。公式SDK 2.3.1による独立したMCP 2.0入口 `dist/mcp2.mjs` のstatus/sendは合成検証済みですが、稼働中の接続には未適用です。[MCP Events互換性検証](docs/mcp-events-compatibility.md)に、再現手順と移行条件を記載しています。
+指定セッションのターン終了・入力待ちを扱う通知実装と、最大10分・1対象の二段階試験入口を追加しました。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
+
+[通知実装・検証範囲](docs/notifications-design.md)と[Mac miniへの移行手順](docs/mac-mini-migration.md)を参照してください。通知には専用RPCを追加したOrcaが必要です。このrepoにはOrca本体の変更と個人用ランチャーを含めていないため、cloneだけでは実通知を開始できません。API-keyによる単一サービス主体は今回の限定試験で動作しましたが、本人識別や一般的な製品認証互換性を保証しません。有料Auth0を前提にしていません。[初期のMCP Events調査](docs/mcp-events-compatibility.md)は履歴として残しています。
 
 ## セットアップ
 
@@ -116,7 +118,7 @@ stdio 対応MCPクライアントの一般的な設定例（未登録）:
 
 Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_status`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り6つです。送信ツールは下記の明示有効化が必要です。
 
-公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。クラウド側への接続には、下記のSecure MCP Tunnel経路を利用できます。bridge自体はstdioサーバーであり、HTTPポートを開きません。Tunnel・キー・ChatGPTプラグインの設定は利用者が個別に行います。
+公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。クラウド側への接続には、下記のSecure MCP Tunnel経路を利用できます。既定のstdio入口はHTTPポートを開きません。通知試験専用入口だけが、明示起動時にloopback HTTPポートを開きます。Tunnel・キー・ChatGPTプラグインの設定は利用者が個別に行います。
 
 音声アシスタント向けの運用例:
 
@@ -223,7 +225,7 @@ ORCA_ENVIRONMENT='<saved-environment-name>' node dist/cli.mjs overview --limit 5
 
 一括送信・再送・再開・停止・削除コマンドは提供しません。既定のMCPは読み取り専用ですが、これはブリッジのAPI制限であり、接続に使用するOrca認証そのものをread-only権限に変えるものではありません。
 
-テストは合成JSONと偽CLIを使い、実エージェントに接続しません。状態変換、壊れた/変化したJSON、ページング、出力制限、未導入CLI、タイムアウト、切断、失敗、ビルド済みCLI、MCP初期化とツール呼び出しを検証します。
+テストは合成JSON・偽CLI・ローカルTLS受信器を使い、実エージェントや製品の通知先に接続しません。状態変換、壊れた/変化したJSON、ページング、出力制限、未導入CLI、タイムアウト、切断、失敗、ビルド済みCLI、MCP初期化とツール呼び出しを検証します。
 
 参考にした公式資料:
 

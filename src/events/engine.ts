@@ -1,3 +1,5 @@
+import type { DiagnosticRecord } from "./preflight-diagnostics.js";
+import { deliveryFailureStage } from "./delivery-diagnostics.js";
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { z } from "zod";
 import { digest, eventNames, projectObservation, targetSchema, type Target } from "./model.js";
@@ -9,17 +11,26 @@ import {
   signingKey,
   type Post,
 } from "./webhook.js";
+import { notificationTargetSchema, type NotificationTarget } from "./orca-contract.js";
+import { externalOrcaEventSchema } from "./orca-adapter.js";
+const engineTargetSchema = z.union([targetSchema, notificationTargetSchema]);
+const engineEventNames = [
+  ...eventNames,
+  "orca.monitoring_interrupted",
+  "orca.session_activity",
+] as const;
+export type EngineTarget = Target | NotificationTarget;
 const finiteTime = z.number().int().nonnegative().max(8640000000000000);
 const bounded = z.string().min(1).max(512);
-const eventSchema = z
+const legacyEventSchema = z
   .object({
     eventId: bounded,
-    name: z.enum(eventNames),
+    name: z.enum(engineEventNames),
     timestamp: z.string().datetime(),
     cursor: z.null(),
     data: z
       .object({
-        target: targetSchema,
+        target: engineTargetSchema,
         turnId: bounded,
         state: z.enum(["done", "waiting", "blocked"]),
         outcome: z.string().max(32).optional(),
@@ -27,12 +38,37 @@ const eventSchema = z
       .strict(),
   })
   .strict();
+const sessionActivitySchema = z
+  .object({
+    eventId: bounded,
+    name: z.literal("orca.session_activity"),
+    timestamp: z.string().datetime(),
+    cursor: z.null(),
+    data: z
+      .object({
+        subscriptionId: bounded,
+        freshness: z.literal("receipt_only"),
+        kind: z.enum(["turn_finished", "input_required", "monitoring_interrupted"]),
+        outcome: z.literal("unconfirmed").optional(),
+        reason: z.string().max(64).optional(),
+      })
+      .strict(),
+  })
+  .strict()
+  .refine((e) =>
+    e.data.kind === "turn_finished"
+      ? e.data.outcome === "unconfirmed" && e.data.reason === undefined
+      : e.data.kind === "monitoring_interrupted"
+        ? e.data.reason !== undefined && e.data.outcome === undefined
+        : e.data.outcome === undefined && e.data.reason === undefined,
+  );
+const eventSchema = z.union([legacyEventSchema, externalOrcaEventSchema, sessionActivitySchema]);
 const subscriptionSchema = z
   .object({
     id: bounded,
     owner: bounded,
-    name: z.enum(eventNames),
-    target: targetSchema,
+    name: z.enum(engineEventNames),
+    target: engineTargetSchema,
     url: z.string().max(4096),
     secret: z.string().max(100),
     previous: z
@@ -67,8 +103,8 @@ const stateSchema = z
 type State = z.infer<typeof stateSchema>;
 export const subscribeSchema = z
   .object({
-    name: z.enum(eventNames),
-    arguments: targetSchema,
+    name: z.enum(engineEventNames),
+    arguments: engineTargetSchema,
     delivery: z
       .object({
         mode: z.literal("webhook"),
@@ -82,8 +118,8 @@ export const subscribeSchema = z
   .strict();
 export const unsubscribeSchema = z
   .object({
-    name: z.enum(eventNames),
-    arguments: targetSchema,
+    name: z.enum(engineEventNames),
+    arguments: engineTargetSchema,
     delivery: z.object({ mode: z.literal("webhook"), url: z.string().max(4096) }).strict(),
   })
   .strict();
@@ -92,14 +128,16 @@ export interface Store {
   load(): Promise<string | null>;
   save(sealedState: string): Promise<void>;
 }
-export type Authorize = (owner: string, target: Target) => Promise<boolean>;
+export type Authorize = (owner: string, target: EngineTarget) => Promise<boolean>;
 export type EngineOptions = {
+  diagnostic?: DiagnosticRecord;
   store: Store;
   key: Buffer;
   post: Post;
   authorize: Authorize;
   allowedCallbackHosts: readonly string[];
   now?: () => number;
+  expiresAt?: number;
 };
 function seal(state: State, key: Buffer): string {
   const nonce = randomBytes(12),
@@ -218,14 +256,21 @@ export class EventEngine {
             ),
             body,
           );
-        } catch {
-          throw new EventError("callback_verification_failed");
+        } catch (error) {
+          if (!(error instanceof EventError && error.code === "callback_approval_required"))
+            this.options.diagnostic?.("challenge_failed");
+          throw new EventError("callback_verification_failed", deliveryFailureStage(error));
         }
         let echoed: unknown;
+        let validJson = true;
         try {
-          echoed = (JSON.parse(reply.body) as { challenge?: unknown }).challenge;
+          const value: unknown = JSON.parse(reply.body);
+          echoed =
+            value !== null && typeof value === "object"
+              ? (value as { challenge?: unknown }).challenge
+              : undefined;
         } catch {
-          /* fixed error below */
+          validJson = false;
         }
         if (
           reply.status < 200 ||
@@ -233,8 +278,33 @@ export class EventEngine {
           this.now() - started > 10000 ||
           this.now() < started ||
           !equalChallenge(echoed, challenge)
-        )
-          throw new EventError("callback_verification_failed");
+        ) {
+          const reason =
+            reply.status === 401 || reply.status === 403
+              ? "challenge_http_auth_rejected"
+              : reply.status === 429
+                ? "challenge_http_rate_limited"
+                : reply.status >= 400 && reply.status < 500
+                  ? "challenge_http_4xx"
+                  : reply.status >= 500 && reply.status < 600
+                    ? "challenge_http_5xx"
+                    : reply.status < 200 || reply.status >= 300
+                      ? "challenge_http_other"
+                      : this.now() < started
+                        ? "challenge_clock_invalid"
+                        : this.now() - started > 10000
+                          ? "challenge_reply_late"
+                          : !validJson
+                            ? "challenge_json_invalid"
+                            : typeof echoed !== "string"
+                              ? "challenge_echo_missing"
+                              : "challenge_echo_mismatch";
+          this.options.diagnostic?.(reason);
+          this.options.diagnostic?.("challenge_response_rejected");
+          this.options.diagnostic?.("challenge_failed");
+          throw new EventError("callback_verification_failed", reason);
+        }
+        this.options.diagnostic?.("challenge_succeeded");
       }
       // Access can change while the verification request is in flight.
       if (!(await this.options.authorize(owner, p.arguments))) throw new EventError("forbidden");
@@ -247,7 +317,7 @@ export class EventEngine {
         url,
         secret: p.delivery.secret,
         createdAt: existing?.createdAt ?? now,
-        expiresAt: now + (p.ttlMs ?? 3600000),
+        expiresAt: Math.min(now + (p.ttlMs ?? 3600000), this.options.expiresAt ?? Infinity),
         verifiedUntil: cached?.verifiedUntil ?? now + 60000,
         ...(existing && existing.secret !== p.delivery.secret
           ? { previous: { secret: existing.secret, until: now + 60000 } }
@@ -258,6 +328,7 @@ export class EventEngine {
       this.state.subscriptions = this.state.subscriptions.filter((s) => s.id !== id);
       this.state.subscriptions.push(subscription);
       await this.persist();
+      this.options.diagnostic?.(existing ? "subscription_refreshed" : "subscription_created");
       return {
         id,
         refreshBefore: new Date(subscription.expiresAt).toISOString(),
@@ -272,6 +343,7 @@ export class EventEngine {
       if (found && found.owner !== owner) throw new EventError("subscription_not_found");
       this.remove(id);
       await this.persist();
+      if (found) this.options.diagnostic?.("subscription_removed");
       return {};
     });
   }
@@ -291,6 +363,7 @@ export class EventEngine {
           this.remove(s.id);
           continue;
         }
+        if (!("hostId" in s.target)) continue;
         const event = projectObservation(observation, s.target, this.now());
         if (!event || event.name !== s.name || Date.parse(event.timestamp) < s.createdAt) continue;
         if (this.state.seen.some((p) => p.subId === s.id && p.eventId === event.eventId)) {
@@ -313,6 +386,50 @@ export class EventEngine {
       await this.persist();
       return result;
     });
+  }
+  /** A verified RPC stream is scoped to one owner and subscription, never broadcast. */
+  async ingestSession(owner: string, id: string, target: NotificationTarget, input: unknown) {
+    return this.serial(async () => {
+      const s = this.state.subscriptions.find((item) => item.id === id && item.owner === owner);
+      const parsed = sessionActivitySchema.safeParse(input);
+      if (
+        !s ||
+        !parsed.success ||
+        digest(s.target) !== digest(target) ||
+        !(await this.options.authorize(owner, s.target))
+      )
+        return false;
+      const event = parsed.data;
+      if (
+        event.name !== s.name ||
+        Date.parse(event.timestamp) < s.createdAt ||
+        this.state.seen.some((p) => p.subId === id && p.eventId === event.eventId)
+      )
+        return false;
+      if (
+        this.state.pending.length >= 128 ||
+        this.state.pending.filter((p) => p.subId === id).length >= 16 ||
+        this.state.seen.length >= 2048
+      )
+        throw new EventError("queue_limit");
+      this.state.pending.push({
+        subId: id,
+        event,
+        body: JSON.stringify(event),
+        attempts: 0,
+        nextAt: this.now(),
+      });
+      this.state.seen.push({ subId: id, eventId: event.eventId });
+      await this.persist();
+      return true;
+    });
+  }
+  async hasSubscription(owner: string, id: string) {
+    return this.serial(async () =>
+      this.state.subscriptions.some(
+        (s) => s.id === id && s.owner === owner && s.expiresAt > this.now(),
+      ),
+    );
   }
   /** One bounded delivery pass; no timer, daemon or implicit monitoring. */
   async deliver() {
