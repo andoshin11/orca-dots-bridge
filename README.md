@@ -1,12 +1,154 @@
 # Orca → dot bridge
 
+Orcaで進めている作業の状態を確認し、指定した1端末に追加指示を送るためのbridgeです。
+
+## はじめてのセットアップ（Mac mini）
+
+**まず、このMacでOrcaの状態を1回読めるところまで進めます。** 手順1〜3で基本動作を確認し、必要なら4で指示送信、5でAIアシスタントへ接続します。以下のコマンドは、これから使うMacの「ターミナル」で上から順に実行してください。新しいMac miniでの実行検証はまだ行っていません。
+
+```text
+Mac mini: Orcaアプリ（作業を実行） ← Orca CLI ← このbridge
+                                                    ↑
+                                    ターミナル / MCP対応アシスタント
+```
+
+Orcaとbridgeは同じMac・同じログインユーザーで動かします。この手順ではMacBook Pro側のOrcaは操作しません。dotから直接呼ぶには、基本動作を確認した後で別途接続設定が必要です。
+
+### 1. 必要なものを用意する
+
+- **Git**：`git --version`で確認します。未導入なら[GitのmacOS向け案内](https://git-scm.com/download/mac)に従って導入してください。
+- **Node.jsとnpm**：[Node.js公式配布](https://nodejs.org/en/download)からNode **24.x（24.11.0以上）**と同梱npmを導入します。導入後にターミナルを開き直し、`node --version`と`npm --version`で確認してください。対応Nodeの全範囲は下の開発用コマンド欄に記載しています。
+- **Orcaアプリと付属CLI**：[Orca公式インストール案内](https://www.onorca.dev/docs/install)から、このMacに合うApple Silicon / Intel版を導入して起動します。アプリのSettingsで「Orca CLI」を探し、CLIを登録してください。[公式CLI案内](https://www.onorca.dev/docs/cli/overview)ではGeneral内、別の参照ページではExperimental内と記載されています。表示は版によって確認してください。
+
+基本の読み取りは**Orca 1.4.220**で実測済みです。通常版のCLIを使い、通知試験用の改造は不要です。別バージョンの互換性は保証していません。旧版の配布先はOrca公式インストール案内の「Older versions」から確認できます。指示送信には、接続・書込み可否・agent識別情報を返す対応CLI/runtimeが必要です。
+
+Orcaの初期設定を済ませ、確認したいリポジトリと作業をアプリで開いたまま、次を実行します。
+
+```sh
+command -v orca
+export ORCA_ENVIRONMENT=''
+export ORCA_PAIRING_CODE=''
+orca status --json
+```
+
+1行目にCLIのパスが表示され、最後のコマンドでruntimeの状態がエラーなく返れば次へ進めます。環境変数を空にするのは、このターミナルでローカルのOrcaを選ぶためです。CLIが見つからない場合は先に登録を確認してください。bridgeはOrcaを自動起動しません。
+
+### 2. bridgeを取得・インストール・buildする
+
+保存先の例はホーム内の`Developer`です。既に同名フォルダがある場合は重ねてcloneせず、そのcheckoutの状態を確認してください。
+
+```sh
+mkdir -p "$HOME/Developer"
+cd "$HOME/Developer"
+git clone https://github.com/andoshin11/orca-dots-bridge.git
+cd orca-dots-bridge
+npm ci --ignore-scripts
+npm run build
+node dist/cli.mjs --help
+```
+
+各コマンドが成功してから次へ進んでください。最後に`status|overview|waiting|detail|logs|inspect|send`の使い方が表示されればbuild完了です。`npm ci`は同梱lockfileの依存を導入します。APIキーや`.env`ファイルは、この基本手順には不要です。
+
+### 3. 最初の状態確認をする
+
+引き続きbridgeのフォルダ内で実行します。`ORCA_BIN`は手順1で登録したOrca CLIの場所です。
+
+```sh
+export ORCA_BIN="$(command -v orca)"
+node dist/cli.mjs overview --limit 5
+```
+
+**`"ok": true`と`result.items`が返れば基本接続は成功です。** `items: []`は取得範囲に作業がない状態です。Orcaで作業を開いてから再実行してください。作業名が分かったら、次の例の2つの値を`items`の`repo`・`title`に置き換えて個別確認できます。長い名前は省略表示されるため、その場合はOrca上の正式名を使います。
+
+```sh
+node dist/cli.mjs status --repo 'my-project' --name 'my-task'
+```
+
+CLIは結果を表示して終了します。常駐サーバーを起動し続ける必要はありません。より詳しい読み取り検証は[ローカル検証手順](docs/local-validation.md)へ進んでください。出力には作業情報が含まれるので、公開repoへ保存しないでください。
+
+### 4. 追加指示を送りたいときだけ
+
+まず`overview`の`items[].id`をコピーして対象の端末を確認します。`<...>`は説明用の値なので、実際の結果に置き換えてください。
+
+```sh
+node dist/cli.mjs detail --id '<items[].id>'
+```
+
+`result.terminals`から意図したagentの`handle`と`worktreeId`を確認します。**次のコマンドは実際に指示を送ります。** 対象と本文を確認したときだけ実行してください。
+
+```sh
+node dist/cli.mjs send --handle '<terminal.handle>' --expected-worktree-id '<terminal.worktreeId>' --text '現在の進捗を短く教えてください'
+```
+
+`accepted`は入力の受付であり、作業完了ではありません。タイムアウトなどで結果不明なら自動再送しません。詳しい制約は下の「1端末への追加指示」を参照してください。
+
+### 5. アシスタントから使う（任意）
+
+**ローカルのMCP対応クライアント**には、クライアントのMCP設定画面で次のstdioサーバーを登録します。まずbridgeのフォルダで必要な絶対パスを確認してください。
+
+```sh
+node -p 'process.execPath'
+pwd
+command -v orca
+```
+
+以下は設定例です。`command`を1行目の出力、`args`内を2行目の出力に`/dist/mcp.mjs`を付けたパス、`ORCA_BIN`を3行目の出力に置き換えます。クライアントによって設定形式は異なります。Codex用には[既存設定例](examples/codex-mcp.toml)があります。
+
+```json
+{
+  "mcpServers": {
+    "orca-readonly": {
+      "command": "/absolute/path/to/node",
+      "args": ["/absolute/path/to/orca-dots-bridge/dist/mcp.mjs"],
+      "env": {
+        "ORCA_BIN": "/absolute/path/to/orca",
+        "ORCA_ENVIRONMENT": "",
+        "ORCA_PAIRING_CODE": "",
+        "ORCA_BRIDGE_ENABLE_SEND": "0",
+        "ORCA_BRIDGE_STATUS_ONLY": "0",
+        "ORCA_BRIDGE_TOOLSET": "full"
+      }
+    }
+  }
+}
+```
+
+クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り6ツールが表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`は変更操作です。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
+
+起動コマンド自体は`node dist/mcp.mjs`です。手動実行時に何も表示されず待つのはstdio通信待ちであり、ブラウザーで開くURLはありません。通常は手動で別起動せず、MCPクライアントに起動させます。
+
+**クラウドのdot**はこのローカル設定を自動で引き継ぎません。接続済みコンピューターのローカルタスク経由なら[dotからの呼び出し](docs/local-validation.md#dotからの呼び出し)、直接MCP接続なら下の「Secure MCP Tunnelでstatusだけを公開する」を参照してください。後者にはTunnel・個人workspace・プラグインの設定が別途必要です。
+
+### 停止・再開と、よくあるつまずき
+
+- CLIの状態確認は毎回終了します。再開はbridgeフォルダで同じコマンドを実行するだけです。新しいターミナルでは手順1・3の環境変数も設定し直します。
+- 手動起動したMCPはそのターミナルで`Ctrl+C`、クライアント管理のMCPはクライアント側で切断・停止します。再開は再接続してください。bridge停止ではOrca内のagentは停止しません。
+- Orcaを終了・再起動した場合はアプリを開き、手順1のruntime確認からやり直します。端末handleは再取得してください。自動起動・常駐化はこの手順では設定しません。
+
+| 症状                                             | 確認すること                                                                                 |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `node` / `npm` / `git`が見つからない             | 手順1の導入後、ターミナルを開き直す                                                          |
+| `cli_missing` / `orca`が見つからない             | OrcaのCLI登録と`command -v orca`を確認し、`ORCA_BIN`を設定する                               |
+| `cli_failed` / `timeout` / runtimeへの接続エラー | Orcaが起動中か、同じユーザーかを確認。先に`orca status --json`を通す                         |
+| `schema_changed`                                 | Orca CLIとアプリの版を確認。応答形式の互換性問題なので、キーの作成では解決しない             |
+| `dist/cli.mjs`がない                             | clone先に`cd`し、`npm ci --ignore-scripts`と`npm run build`の成功を確認                      |
+| 一覧が空 / 名前で見つからない                    | Orcaで作業を開き、`overview`で対象を探す。repoと作業名は完全一致                             |
+| MCPで送信ツールが見えない                        | `ORCA_BRIDGE_ENABLE_SEND=1`にして再接続。`ORCA_BRIDGE_STATUS_ONLY=1`は送信より優先される     |
+| 検証で`EPERM`                                    | 実行環境の承認手順を確認。通常テストにもローカルsocket通信が必要。OSの保護機能を無効にしない |
+
+### 自動通知は別の実験機能です
+
+上の手順は状態確認と明示的な指示送信です。ターン終了・入力待ちの自動通知には、専用RPCを追加したOrcaが必要です。**この公開repoには、そのOrca本体変更も個人用ランチャーも含まれません。通常版をインストールしただけでは通知試験を開始できません。** 対応Orcaを別途準備できるまで保留してください。[通知実装・検証範囲](docs/notifications-design.md)と[通知試験のMac mini移行手順](docs/mac-mini-migration.md)に条件をまとめています。
+
+## 実装状況
+
 Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
 
 指定セッションのターン終了・入力待ちを扱う通知実装と、最大10分・1対象の二段階試験入口を追加しました。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
 
 [通知実装・検証範囲](docs/notifications-design.md)と[Mac miniへの移行手順](docs/mac-mini-migration.md)を参照してください。通知には専用RPCを追加したOrcaが必要です。このrepoにはOrca本体の変更と個人用ランチャーを含めていないため、cloneだけでは実通知を開始できません。API-keyによる単一サービス主体は今回の限定試験で動作しましたが、本人識別や一般的な製品認証互換性を保証しません。有料Auth0を前提にしていません。[初期のMCP Events調査](docs/mcp-events-compatibility.md)は履歴として残しています。
 
-## セットアップ
+## 開発用コマンド
 
 Node.js `^22.18.0 || ^24.11.0 || >=26.0.0`、npm、Orca CLI と起動済み runtime が必要です。
 
