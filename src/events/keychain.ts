@@ -66,14 +66,31 @@ export function createMacKeychain(
     putNew: async (account: KeyAccount, key: Buffer) => {
       if (key.length !== 32) throw new Error("invalid_keychain_key");
       const name = accountName(account);
-      const existing = await command(["find-generic-password", "-s", service, "-a", name]);
+      // Errors are named by phase so callers know whether a key may have been written:
+      // nothing is written before `add`; from `add` on, a key may exist.
+      const existing = await command(["find-generic-password", "-s", service, "-a", name]).catch(
+        () => {
+          throw new Error("keychain_account_exists_or_unavailable");
+        },
+      );
       if (existing.code !== 44) throw new Error("keychain_account_exists_or_unavailable");
       const result = await command(
         ["-i"],
         `add-generic-password -s ${service} -a ${name} -w ${key.toString("base64")}\n`,
-      );
+      ).catch(() => {
+        throw new Error("keychain_write_unconfirmed");
+      });
       if (result.code !== 0) throw new Error("keychain_write_failed");
-      const verify = await command(["find-generic-password", "-s", service, "-a", name, "-w"]);
+      const verify = await command([
+        "find-generic-password",
+        "-s",
+        service,
+        "-a",
+        name,
+        "-w",
+      ]).catch(() => {
+        throw new Error("keychain_write_unconfirmed");
+      });
       const actual = Buffer.from(verify.stdout.trim(), "base64");
       try {
         if (verify.code !== 0 || actual.length !== key.length || !timingSafeEqual(actual, key))

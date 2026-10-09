@@ -27,7 +27,7 @@ Mac mini専用の隔離profileとruntimeを準備し、当該runtimeの認証付
 
 ## 4. 二段階の試験
 
-利用者が管理するローカルプロセスで、専用32バイトキーをmacOS Keychainに準備します。実装上のservice名は`orca-dots-bridge.notifications-test`、accountは`service-v1`と`outbox-v1`です。既存accountを上書きしません。キー・runtime token・callback URLをチャット、argv、Git、通常ログへ出さないでください。
+利用者が管理するローカルプロセスで、専用32バイトキーをmacOS Keychainに準備します。実装上のservice名は`orca-dots-bridge.notifications-test`、accountは`service-v1`と`outbox-v1`です。Mac上のターミナルで`node dist/trial-key-setup.mjs`を実行すると両方を作成し、dotプラグインのAPIキーをstderrに1回だけ表示します（手順は[relay pluginによる通知](relay-notifications.md)の「試験用の鍵を作る」を参照）。既存accountを上書きしません。キー・runtime token・callback URLをチャット、argv、Git、通常ログへ出さないでください。
 
 `src/events/trial-runner.ts`の`twoPhaseTrialConfigSchema`と`src/events/two-phase-endpoint.ts`のscope schemaに従う設定を用意します。`dist/notification-two-phase.mjs`のstdinへ初期設定とruntime tokenを1レコードで渡し、stderrはprivate TTYに接続します。対象hashと期限を含むscopeの承認文言はschemaで検証されます。専用Tunnelから認証付きloopback endpointへ接続します。
 

@@ -18,6 +18,7 @@ export default defineConfig({
       "src/notification-preflight.ts",
       "src/notification-approval-check.ts",
       "src/relay-key-setup.ts",
+      "src/trial-key-setup.ts",
     ],
     format: ["esm"],
     platform: "node",
