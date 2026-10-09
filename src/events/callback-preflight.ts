@@ -2,6 +2,7 @@ import { z } from "zod";
 import { subscribeSchema } from "./engine.js";
 import { digest } from "./model.js";
 import { notificationTargetSchema, sameNotificationTarget } from "./orca-contract.js";
+import { paneTargetSchema } from "./pane-contract.js";
 import { callbackUrl, signingKey, EventError } from "./webhook.js";
 import { createServiceKeyResolver } from "./service-key.js";
 import { createSessionMcpHttpEntry } from "./http-entry.js";
@@ -57,12 +58,20 @@ function inspect(owner: string, params: unknown, diagnostic?: DiagnosticRecord) 
     throw parsed.error;
   }
   const p = parsed.data;
-  if (p.name !== "orca.session_activity") {
+  // Each event name accepts only its own target shape, so a pane-scoped approval
+  // can never authorize a session subscription or the reverse.
+  const targetSchema =
+    p.name === "orca.session_activity"
+      ? notificationTargetSchema
+      : p.name === "orca.pane_activity"
+        ? paneTargetSchema
+        : undefined;
+  if (!targetSchema) {
     diagnostic?.("event_name_rejected");
     throw new EventError("invalid_params");
   }
   const target = checked(diagnostic, "target_schema_rejected", () =>
-    notificationTargetSchema.parse(p.arguments),
+    targetSchema.parse(p.arguments),
   );
   checked(diagnostic, "signing_key_rejected", () => signingKey(p.delivery.secret).fill(0));
   // Syntax check only: deriving a host here NEVER authorizes DNS, challenge or delivery.
@@ -148,7 +157,9 @@ export function createCallbackPreflight(options: {
             throw new EventError("invalid_params");
           }
           const candidate = inspect(owner, params, options.diagnostic);
-          if (!sameNotificationTarget(target, candidate.target)) {
+          // This preflight reviews session subscriptions only.
+          const candidateTarget = notificationTargetSchema.safeParse(candidate.target);
+          if (!candidateTarget.success || !sameNotificationTarget(target, candidateTarget.data)) {
             options.diagnostic?.("target_mismatch");
             throw new EventError("unauthorized");
           }

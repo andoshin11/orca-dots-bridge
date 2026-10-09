@@ -1,5 +1,5 @@
 import { z } from "zod";
-const identity = z
+export const identity = z
   .string()
   .min(1)
   .max(4096)

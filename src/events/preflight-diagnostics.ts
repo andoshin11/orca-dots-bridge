@@ -132,6 +132,13 @@ export const diagnosticStages = [
   "challenge_json_invalid",
   "challenge_echo_missing",
   "challenge_echo_mismatch",
+  "relay_arrived",
+  "relay_signature_rejected",
+  "relay_replay_rejected",
+  "relay_schema_rejected",
+  "relay_test_received",
+  "relay_status_received",
+  "pane_status_queued",
 ] as const;
 export type DiagnosticStage = (typeof diagnosticStages)[number];
 export type DiagnosticRecord = (stage: DiagnosticStage) => void;
