@@ -143,6 +143,76 @@ command -v orca
 - **セッション単位（`orca.session_activity`）:** 専用RPCを追加したOrcaが必要です。**この公開repoには、そのOrca本体変更も個人用ランチャーも含まれません。** [通知実装・検証範囲](docs/notifications-design.md)と[通知試験のMac mini移行手順](docs/mac-mini-migration.md)に条件をまとめています。
 - **ペイン単位（`orca.pane_activity`）:** 通常版のOrcaに、Orca plugin [orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay) を入れて使います。同じペインで始まった別のセッションの区別と、取りこぼしの検出はできません。準備と制約は[relay pluginによる通知](docs/relay-notifications.md)を参照してください。dotへの実通知は未確認です。
 
+## 通信経路
+
+bridge・Orca・Tunnel クライアントは、すべて同じ Mac の同じログインユーザーで動かします。Tunnel クライアントは Mac から外へ接続するだけで、Mac 側で外部に向けてポートを開くことはありません。bridge が待ち受けるのは `127.0.0.1` だけです。
+
+### 状態確認と指示の送信
+
+```mermaid
+flowchart LR
+  subgraph cloud["クラウド"]
+    dot["dot（個人用プラグイン）"]
+  end
+  subgraph mac["Mac（同じログインユーザー）"]
+    tunnel["Tunnel クライアント"]
+    local["ローカルの MCP クライアント<br/>（Codex など）"]
+    task["dot のローカルタスク<br/>（接続済みコンピューター）"]
+    mcp["bridge<br/>dist/mcp.mjs（stdio）"]
+    cli["bridge<br/>dist/cli.mjs"]
+    orcacli["Orca CLI"]
+    orca["Orca アプリ / runtime"]
+  end
+  dot -- "MCP（Secure MCP Tunnel）" --> tunnel
+  tunnel -- "stdio" --> mcp
+  local -- "stdio" --> mcp
+  dot -. "タスクの委任" .-> task
+  task -- "コマンド実行" --> cli
+  mcp -- "子プロセス（shell なし）" --> orcacli
+  cli -- "子プロセス（shell なし）" --> orcacli
+  orcacli -- "ローカル IPC" --> orca
+```
+
+- 公開するツールは、起動時の環境変数で決まります（既定は読み取り 6 つ。下の Tunnel の手順では `orca_status` だけ、または `orca_status` と `orca_send_instruction` だけを公開します）。
+- 指示の送信は、確認済みの terminal handle 1 つへの `orca terminal send` 1 回だけです。
+
+### 自動通知（二段階試験）
+
+```mermaid
+flowchart LR
+  subgraph mac["Mac（同じログインユーザー）"]
+    orca["Orca アプリ / runtime"]
+    relay["relay plugin<br/>orca-agent-status-relay"]
+    tunnel["Tunnel クライアント<br/>（通知用）"]
+    trial["bridge 二段階試験<br/>dist/notification-two-phase.mjs"]
+    orcacli["Orca CLI<br/>terminal show → Orca"]
+    kc[("macOS Keychain<br/>outbox-v1 / service-v1 / relay-v1")]
+  end
+  subgraph cloud["クラウド"]
+    dot["dot"]
+    hook["dot の webhook<br/>（callback URL）"]
+  end
+  orca -- "agent.status.changed" --> relay
+  relay -- "HTTP 127.0.0.1:relayPort/relay<br/>Standard Webhooks 署名（relay-v1）" --> trial
+  orca -. "改造版 Orca のみ<br/>専用 RPC（セッション単位）" .-> trial
+  dot -- "events/subscribe（MCP Events）" --> tunnel
+  tunnel -- "HTTP 127.0.0.1:8787/mcp<br/>Bearer（service-v1）" --> trial
+  trial -- "イベントごとに<br/>ペインを再確認" --> orcacli
+  trial -. "起動時に鍵を読む" .-> kc
+  trial -- "HTTPS webhook<br/>購読時の secret で署名" --> hook
+```
+
+| 区間                                   | 方式                                                  | 認証・保護                                                                            |
+| -------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| dot → bridge（購読）                   | Tunnel → `127.0.0.1:8787/mcp`（MCP Events）           | `Authorization: Bearer`（Keychain の `service-v1`）                                   |
+| relay plugin → bridge（ペイン単位）    | `127.0.0.1:<relayPort>/relay`（MCP 用とは別のポート） | Standard Webhooks 署名（`relay-v1`）、時刻 ±5 分、`webhook-id` の再送拒否             |
+| 改造版 Orca → bridge（セッション単位） | runtime の専用 RPC（ローカル IPC）                    | runtime token                                                                         |
+| bridge → Orca（ペインの再確認）        | Orca CLI の `terminal show`                           | この Mac のユーザー権限                                                               |
+| bridge → dot の webhook                | HTTPS（許可したホストのみ、443、リダイレクト不可）    | Standard Webhooks 署名（購読時に dot が渡す secret）、送信待ちは `outbox-v1` で暗号化 |
+
+- 通知は、確認通信 1 回と、private TTY での送信先 URL の確認・承認を経てから始まります。期限は最長 10 分、対象は 1 つです。
+- ペイン単位（relay plugin）とセッション単位（改造版 Orca）のどちらか一方を、起動時の設定で選びます。違いは[relay plugin による通知](docs/relay-notifications.md)と[通知実装・検証範囲](docs/notifications-design.md)を参照してください。
+
 ## 実装状況
 
 Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
