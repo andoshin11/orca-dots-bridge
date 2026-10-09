@@ -7,7 +7,10 @@ import { resolve } from "node:path";
 import { z } from "zod";
 import { startTwoPhaseTrial } from "./events/trial-runner.js";
 
-const first = z.object({ config: z.unknown(), runtimeToken: z.string().min(1) }).strict();
+// runtimeToken is omitted for a relay-sourced config, which never connects to the runtime socket.
+const first = z
+  .object({ config: z.unknown(), runtimeToken: z.string().min(1).optional() })
+  .strict();
 const next = z.object({ command: z.literal("activate"), approval: z.unknown() }).strict();
 export function privateReviewText(url: string) {
   if (!/^[\x21-\x7e]+$/.test(url) || url.length > 4096) throw new Error("review_invalid");
@@ -84,7 +87,7 @@ export async function runTwoPhaseCli(
           if (closing) return;
           if (!trial) {
             const value = first.parse(JSON.parse(line));
-            trial = await start(value.config, value.runtimeToken, (url) => {
+            trial = await start(value.config, value.runtimeToken ?? "", (url) => {
               io.review(privateReviewText(url));
               io.output("Two-phase verified; notification approval required.\n");
             });

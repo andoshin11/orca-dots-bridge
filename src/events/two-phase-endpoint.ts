@@ -3,8 +3,12 @@ import { digest } from "./model.js";
 import { subscribeSchema, type EngineOptions } from "./engine.js";
 import { assertCallbackApproval, type CallbackApproval } from "./callback-preflight.js";
 import { callbackUrl, EventError } from "./webhook.js";
-import { notificationTargetSchema, sameNotificationTarget } from "./orca-contract.js";
-import { createServiceNotificationEndpoint } from "./service-endpoint.js";
+import { notificationTargetSchema } from "./orca-contract.js";
+import {
+  createServiceNotificationEndpoint,
+  sessionMonitor,
+  type NotificationMonitor,
+} from "./service-endpoint.js";
 import { limitTrialVerification } from "./trial-verification-budget.js";
 import type { OrcaEventTransport } from "./session-rpc.js";
 import type { DiagnosticRecord } from "./preflight-diagnostics.js";
@@ -37,10 +41,15 @@ export const verificationScopeSchema = z
     )
       ctx.addIssue({ code: "custom", message: "invalid_scope" });
   });
-export function validateVerificationScope(raw: unknown, target: unknown, now = Date.now()) {
+export function validateVerificationScope(
+  raw: unknown,
+  target: unknown,
+  now = Date.now(),
+  parseTarget: (value: unknown) => unknown = (value) => notificationTargetSchema.parse(value),
+) {
   const scope = verificationScopeSchema.parse(raw);
   if (
-    digest(notificationTargetSchema.parse(target)) !== scope.targetHash ||
+    digest(parseTarget(target)) !== scope.targetHash ||
     scope.expiresAt - now < 2000 ||
     scope.expiresAt - now > 600000
   )
@@ -62,13 +71,19 @@ export async function createTwoPhaseEndpoint(options: {
   target: unknown;
   serviceKey: Buffer;
   engine: Omit<EngineOptions, "authorize" | "allowedCallbackHosts">;
-  transport: OrcaEventTransport & { describe: (handle: string) => Promise<unknown> };
+  /** Session monitoring over the runtime RPC; ignored when `monitor` is given. */
+  transport?: OrcaEventTransport & { describe: (handle: string) => Promise<unknown> };
+  monitor?: NotificationMonitor;
   diagnostic?: DiagnosticRecord;
   review: (url: string) => void;
 }) {
   const now = options.engine.now ?? Date.now;
-  const target = notificationTargetSchema.parse(options.target);
-  const scope = validateVerificationScope(options.scope, target, now());
+  if (!options.monitor && !options.transport) throw new Error("monitor_required");
+  const monitor = options.monitor ?? sessionMonitor(options.transport!);
+  const target = monitor.parseTarget(options.target) as { terminalHandle: string };
+  const scope = validateVerificationScope(options.scope, target, now(), (value) =>
+    monitor.parseTarget(value),
+  );
   // Never resume an old verified subscription or its event outbox after process restart.
   if ((await options.engine.store.load()) !== null)
     throw new EventError("trial_state_already_exists");
@@ -80,12 +95,7 @@ export async function createTwoPhaseEndpoint(options: {
   };
   const revalidate = async () => {
     valid();
-    if (
-      !sameNotificationTarget(
-        target,
-        notificationTargetSchema.parse(await options.transport.describe(target.terminalHandle)),
-      )
-    )
+    if (!monitor.sameTarget(target, await monitor.describe(target.terminalHandle)))
       throw new EventError("runtime_target_changed");
     valid();
   };
@@ -102,7 +112,7 @@ export async function createTwoPhaseEndpoint(options: {
     expiresAt: scope.expiresAt,
     diagnostic: options.diagnostic,
     deferMonitoring: true,
-    transport: options.transport,
+    monitor,
     beforeSubscribe: async (owner, raw) => {
       valid();
       if (phase !== "fresh") throw new EventError("subscription_limit");
@@ -110,8 +120,8 @@ export async function createTwoPhaseEndpoint(options: {
       const parsed = subscribeSchema.parse(raw);
       if (
         owner !== scope.owner ||
-        parsed.name !== "orca.session_activity" ||
-        !sameNotificationTarget(target, notificationTargetSchema.parse(parsed.arguments))
+        parsed.name !== monitor.eventName ||
+        !monitor.sameTarget(target, parsed.arguments)
       )
         throw new EventError("unauthorized");
       callbackUrl(parsed.delivery.url, [scope.host]);

@@ -1,7 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
 const service = "orca-dots-bridge.notifications-test";
-export type KeyAccount = "outbox-v1" | "service-v1";
+export type KeyAccount = "outbox-v1" | "service-v1" | "relay-v1";
 type Result = { code: number; stdout: string };
 export type KeychainCommand = (args: string[], input?: string) => Promise<Result>;
 const runSecurity: KeychainCommand = (args, input) =>
@@ -42,7 +42,8 @@ export function createMacKeychain(
 ) {
   if (platform !== "darwin") throw new Error("macos_keychain_required");
   const accountName = (account: KeyAccount) => {
-    if (account !== "outbox-v1" && account !== "service-v1") throw new Error("invalid_key_account");
+    if (account !== "outbox-v1" && account !== "service-v1" && account !== "relay-v1")
+      throw new Error("invalid_key_account");
     return account;
   };
   return {
