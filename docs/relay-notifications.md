@@ -36,7 +36,27 @@ Orca の Settings → Plugins → プラグインをインストール → Git U
 https://github.com/andoshin11/orca-agent-status-relay#v0.1.0
 ```
 
-### 2. relay 用の鍵と plugin の設定を作る
+### 2. 試験用の鍵を作る（初回だけ）
+
+bridge のフォルダで、Mac の「ターミナル」から直接、次を実行します。API キーが画面に出るので、Orca の内蔵ターミナル（エージェントが読める）や画面共有中・録画中のターミナルでは実行しないでください。
+
+```sh
+npm run build
+node dist/trial-key-setup.mjs
+```
+
+- macOS Keychain の `orca-dots-bridge.notifications-test` に、`outbox-v1`（試験の送信待ちを暗号化する鍵）と `service-v1`（dot を認証する鍵）を作ります。
+- `service-v1` から作った **dot プラグインの API キー**を、ターミナル（stderr）に 1 回だけ表示します。dot 側の設定に入れたら、画面を閉じてください。チャット・Git・コマンド引数・通常ログには貼らないでください。もう一度は表示できないので、控えそびれたら両方の account を消してから作り直します。
+- stderr が端末でない（リダイレクトしている）場合は、鍵を作る前に `private_terminal_required` で止まります。
+- どちらかの account が既にあれば、何も上書きせずに止まります。途中で失敗した場合は、このコマンドが作った分を消します。Keychain への書き込みが途中で失敗した account も、このコマンドが作ったものとして消します。想定外のエラーで書き込めたか判断できない account や、消せなかった account は消さずに、失敗メッセージに `(check Keychain accounts: ...)` と名前を出します。その account は Keychain アクセスで確認してください。
+- 作り直すときは、次で両方を消してから実行してください。`outbox-v1` を作り直すと、それまでの試験の状態ファイルは読めなくなります（試験は終了時に状態を消すので、通常は影響ありません）。
+
+  ```sh
+  security delete-generic-password -s orca-dots-bridge.notifications-test -a outbox-v1
+  security delete-generic-password -s orca-dots-bridge.notifications-test -a service-v1
+  ```
+
+### 3. relay 用の鍵と plugin の設定を作る
 
 bridge のフォルダで、relay を受けるポートを決めて実行します（MCP 用の `port` とは別の番号にします）。
 
@@ -51,7 +71,7 @@ node dist/relay-key-setup.mjs --relay-port 8788
 
 relay plugin の「Agent Status Relay: Send test event」コマンドで、この段階の疎通を確かめられます（bridge 側の受け口が起動している必要があります）。
 
-### 3. 監視するペインの対象を取る
+### 4. 監視するペインの対象を取る
 
 `detail` などで監視したい terminal の handle を確かめ、次を実行します。
 
@@ -61,12 +81,12 @@ ORCA_BIN="$(command -v orca)" node dist/cli.mjs pane-target --handle '<terminal 
 
 `result.target` が設定の `target` に、`result.targetHash` が承認範囲の `targetHash` に入ります。
 
-### 4. 二段階試験を起動する
+### 5. 二段階試験を起動する
 
 既存の二段階試験（`dist/notification-two-phase.mjs`）と同じ手順です。違いは次の 3 点です。
 
 - 設定に `"source": "relay"` と `relayPort` を入れ、`runtime` は入れない
-- `target` はペイン単位の対象（手順 3 の出力）
+- `target` はペイン単位の対象（手順 4 の出力）
 - stdin の最初のレコードには `runtimeToken` を入れない（入れると拒否します）
 
 ```json
@@ -96,7 +116,7 @@ ORCA_BIN="$(command -v orca)" node dist/cli.mjs pane-target --handle '<terminal 
 }
 ```
 
-実際には 1 行の JSON として渡します。`expiresAt` は起動時刻から 10 分以内です。その後の確認通信・private TTY での URL 確認・`activate` レコードは、既存の手順（[Mac mini への移行手順](mac-mini-migration.md) の 4）と同じです。dot 側の購読ではイベント名 `orca.pane_activity` と、手順 3 の `target` をそのまま使います。
+実際には 1 行の JSON として渡します。`expiresAt` は起動時刻から 10 分以内です。その後の確認通信・private TTY での URL 確認・`activate` レコードは、既存の手順（[Mac mini への移行手順](mac-mini-migration.md) の 4）と同じです。dot 側の購読ではイベント名 `orca.pane_activity` と、手順 4 の `target` をそのまま使います。dot プラグインの認証には、手順 2 で表示した API キーを使います。
 
 ## 動き
 
