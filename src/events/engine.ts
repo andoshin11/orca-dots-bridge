@@ -13,13 +13,15 @@ import {
 } from "./webhook.js";
 import { notificationTargetSchema, type NotificationTarget } from "./orca-contract.js";
 import { externalOrcaEventSchema } from "./orca-adapter.js";
-const engineTargetSchema = z.union([targetSchema, notificationTargetSchema]);
+import { paneTargetSchema, type PaneTarget } from "./pane-contract.js";
+const engineTargetSchema = z.union([targetSchema, notificationTargetSchema, paneTargetSchema]);
 const engineEventNames = [
   ...eventNames,
   "orca.monitoring_interrupted",
   "orca.session_activity",
+  "orca.pane_activity",
 ] as const;
-export type EngineTarget = Target | NotificationTarget;
+export type EngineTarget = Target | NotificationTarget | PaneTarget;
 const finiteTime = z.number().int().nonnegative().max(8640000000000000);
 const bounded = z.string().min(1).max(512);
 const legacyEventSchema = z
@@ -62,7 +64,39 @@ const sessionActivitySchema = z
         ? e.data.reason !== undefined && e.data.outcome === undefined
         : e.data.outcome === undefined && e.data.reason === undefined,
   );
-const eventSchema = z.union([legacyEventSchema, externalOrcaEventSchema, sessionActivitySchema]);
+/** Pane-scoped activity from the relay plugin: no session, turn or sequence proof. */
+const paneActivitySchema = z
+  .object({
+    eventId: bounded,
+    name: z.literal("orca.pane_activity"),
+    timestamp: z.string().datetime(),
+    cursor: z.null(),
+    data: z
+      .object({
+        subscriptionId: bounded,
+        freshness: z.literal("receipt_only"),
+        assurance: z.literal("pane_only"),
+        kind: z.enum(["turn_finished", "input_required", "monitoring_interrupted"]),
+        outcome: z.literal("unconfirmed").optional(),
+        reason: z.string().max(64).optional(),
+      })
+      .strict(),
+  })
+  .strict()
+  .refine((e) =>
+    e.data.kind === "turn_finished"
+      ? e.data.outcome === "unconfirmed" && e.data.reason === undefined
+      : e.data.kind === "monitoring_interrupted"
+        ? e.data.reason !== undefined && e.data.outcome === undefined
+        : e.data.outcome === undefined && e.data.reason === undefined,
+  );
+const monitoredActivitySchema = z.union([sessionActivitySchema, paneActivitySchema]);
+const eventSchema = z.union([
+  legacyEventSchema,
+  externalOrcaEventSchema,
+  sessionActivitySchema,
+  paneActivitySchema,
+]);
 const subscriptionSchema = z
   .object({
     id: bounded,
@@ -101,6 +135,10 @@ const stateSchema = z
   })
   .strict();
 type State = z.infer<typeof stateSchema>;
+// The pane event name and the pane target shape only ever go together, so a
+// pane-scoped subscription can never be created for a stricter target or the reverse.
+const paneNameMatchesTarget = (value: { name: string; arguments: unknown }) =>
+  (value.name === "orca.pane_activity") === paneTargetSchema.safeParse(value.arguments).success;
 export const subscribeSchema = z
   .object({
     name: z.enum(engineEventNames),
@@ -115,14 +153,16 @@ export const subscribeSchema = z
     ttlMs: z.number().int().min(1000).max(86400000).nullable().optional(),
     cursor: z.null().optional(),
   })
-  .strict();
+  .strict()
+  .refine(paneNameMatchesTarget, { message: "event_target_mismatch", path: ["arguments"] });
 export const unsubscribeSchema = z
   .object({
     name: z.enum(engineEventNames),
     arguments: engineTargetSchema,
     delivery: z.object({ mode: z.literal("webhook"), url: z.string().max(4096) }).strict(),
   })
-  .strict();
+  .strict()
+  .refine(paneNameMatchesTarget, { message: "event_target_mismatch", path: ["arguments"] });
 export interface Store {
   /** A production adapter must atomically persist before resolving; no file adapter is enabled here. */
   load(): Promise<string | null>;
@@ -388,10 +428,15 @@ export class EventEngine {
     });
   }
   /** A verified RPC stream is scoped to one owner and subscription, never broadcast. */
-  async ingestSession(owner: string, id: string, target: NotificationTarget, input: unknown) {
+  async ingestSession(
+    owner: string,
+    id: string,
+    target: NotificationTarget | PaneTarget,
+    input: unknown,
+  ) {
     return this.serial(async () => {
       const s = this.state.subscriptions.find((item) => item.id === id && item.owner === owner);
-      const parsed = sessionActivitySchema.safeParse(input);
+      const parsed = monitoredActivitySchema.safeParse(input);
       if (
         !s ||
         !parsed.success ||

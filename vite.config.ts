@@ -17,6 +17,7 @@ export default defineConfig({
       "src/notification-two-phase.ts",
       "src/notification-preflight.ts",
       "src/notification-approval-check.ts",
+      "src/relay-key-setup.ts",
     ],
     format: ["esm"],
     platform: "node",

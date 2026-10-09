@@ -138,13 +138,16 @@ command -v orca
 
 ### 自動通知は別の実験機能です
 
-上の手順は状態確認と明示的な指示送信です。ターン終了・入力待ちの自動通知には、専用RPCを追加したOrcaが必要です。**この公開repoには、そのOrca本体変更も個人用ランチャーも含まれません。通常版をインストールしただけでは通知試験を開始できません。** 対応Orcaを別途準備できるまで保留してください。[通知実装・検証範囲](docs/notifications-design.md)と[通知試験のMac mini移行手順](docs/mac-mini-migration.md)に条件をまとめています。
+上の手順は状態確認と明示的な指示送信です。ターン終了・入力待ちの自動通知には、次の2つの経路があります。どちらも最大10分・1対象の試験として動きます。
+
+- **セッション単位（`orca.session_activity`）:** 専用RPCを追加したOrcaが必要です。**この公開repoには、そのOrca本体変更も個人用ランチャーも含まれません。** [通知実装・検証範囲](docs/notifications-design.md)と[通知試験のMac mini移行手順](docs/mac-mini-migration.md)に条件をまとめています。
+- **ペイン単位（`orca.pane_activity`）:** 通常版のOrcaに、Orca plugin [orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay) を入れて使います。同じペインで始まった別のセッションの区別と、取りこぼしの検出はできません。準備と制約は[relay pluginによる通知](docs/relay-notifications.md)を参照してください。dotへの実通知は未確認です。
 
 ## 実装状況
 
 Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
 
-指定セッションのターン終了・入力待ちを扱う通知実装と、最大10分・1対象の二段階試験入口を追加しました。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
+指定セッションのターン終了・入力待ちを扱う通知実装と、最大10分・1対象の二段階試験入口を追加しました。通常版Orcaとrelay pluginで動くペイン単位の経路も追加しました（[relay pluginによる通知](docs/relay-notifications.md)、dotへの実通知は未確認）。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
 
 [通知実装・検証範囲](docs/notifications-design.md)と[Mac miniへの移行手順](docs/mac-mini-migration.md)を参照してください。通知には専用RPCを追加したOrcaが必要です。このrepoにはOrca本体の変更と個人用ランチャーを含めていないため、cloneだけでは実通知を開始できません。API-keyによる単一サービス主体は今回の限定試験で動作しましたが、本人識別や一般的な製品認証互換性を保証しません。有料Auth0を前提にしていません。[初期のMCP Events調査](docs/mcp-events-compatibility.md)は履歴として残しています。
 

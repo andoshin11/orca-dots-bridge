@@ -13,7 +13,9 @@ const mock = vi.hoisted(() => ({
 vi.mock("node:http", () => ({ createServer: mock.createServer }));
 vi.mock("../src/events/file-store.js", () => ({ openAtomicStore: async () => mock.store }));
 vi.mock("../src/events/keychain.js", () => ({ createMacKeychain: () => mock.keys }));
-vi.mock("../src/events/service-endpoint.js", () => ({
+vi.mock("../src/events/service-endpoint.js", async (importOriginal) => ({
+  // trial-runner also builds sessionMonitor/paneMonitor; only the endpoint itself is faked.
+  ...(await importOriginal<typeof import("../src/events/service-endpoint.js")>()),
   createServiceNotificationEndpoint: vi.fn(async () => mock.endpoint),
 }));
 vi.mock("../src/events/runtime-transport.js", () => ({

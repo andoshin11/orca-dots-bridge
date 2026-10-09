@@ -17,7 +17,9 @@
 
 `notification-trial.ts`は事前にURL承認が済んだ経路、`notification-preflight.ts`と`notification-approval-check.ts`は確認用です。これらはインストール時や通常MCP起動時に自動実行されません。
 
-Orcaには`terminal.agentEvents.describe`と対象限定購読の専用RPCが必要です。隔離Orcaへの追加実装で試験しましたが、**Orca本体の変更はこのrepoに含めていません**。通常版のhost-events payloadからsession/turnを推測する代替経路はありません。対応runtimeを別途用意できるまで、実通知の移行は保留です。
+Orcaには`terminal.agentEvents.describe`と対象限定購読の専用RPCが必要です。隔離Orcaへの追加実装で試験しましたが、**Orca本体の変更はこのrepoに含めていません**。通常版のhost-events payloadからsession/turnを推測する代替経路はありません。対応runtimeを別途用意できるまで、セッション単位の実通知の移行は保留です。
+
+通常版Orcaで使える別経路として、保証をペイン単位に限定した`orca.pane_activity`を追加しました。session/turnを推測するのではなく、ペイン単位であること・取りこぼしを検出できないことを、イベント（`assurance: "pane_only"`）とcatalogの説明に明示します。詳細は[relay pluginによる通知](relay-notifications.md)を参照してください。
 
 ## 試験の動作と制約
 
