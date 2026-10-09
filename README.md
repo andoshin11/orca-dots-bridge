@@ -274,6 +274,8 @@ Node と Orca は実際の絶対パスに置き換えてください。MCPの st
 
 ## Secure MCP Tunnelでstatusだけを公開する
 
+状態確認には Tunnel を使わない構成（dot のローカルタスク経由）もあります。自動通知には、ここで説明するものとは別の通知用 Tunnel が必要です。どちらも[通知用Tunnelの設定](docs/notification-tunnel.md)の「Tunnel は必要か」で比べています。
+
 サーバー起動時に `ORCA_BRIDGE_STATUS_ONLY=1` を設定すると、公開ツールは `orca_status` の1件だけになります。`ORCA_BRIDGE_ENABLE_SEND=1` が同時に存在しても、送信を含む他のツールは登録されず、呼び出しも拒否します。これはMCPの公開範囲の制限であり、CLIの機能やOrca自体の権限は変更しません。statusは状態に加えて上限付きの進捗ログを返す場合があります。
 
 ```sh
