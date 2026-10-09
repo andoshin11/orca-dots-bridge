@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createMacKeychain, type KeyAccount } from "./events/keychain.js";
+import { KeySetupError, putOwned, setupErrorCode } from "./key-setup-shared.js";
 
 export const defaultRelayConfigPath = () =>
   join(homedir(), ".config", "orca-agent-status-relay", "config.json");
@@ -35,8 +36,14 @@ export async function setupRelayKey(options: {
   });
   const key = (options.random ?? randomBytes)(32);
   let stored = false;
+  let uncertain = false;
   try {
-    await options.keys.putNew("relay-v1", key);
+    const result = await putOwned(options.keys, "relay-v1", key);
+    if (!result.ok) {
+      stored = result.written === "yes";
+      uncertain = result.written === "unknown";
+      throw result.error;
+    }
     stored = true;
     const config = {
       url: `http://127.0.0.1:${options.relayPort}/relay`,
@@ -47,9 +54,20 @@ export async function setupRelayKey(options: {
   } catch (error) {
     await file.close().catch(() => undefined);
     await unlink(options.configPath).catch(() => undefined);
-    // Never leave a Keychain key that no plugin config carries.
-    if (stored) await options.keys.remove("relay-v1").catch(() => undefined);
-    throw error;
+    // Never leave a Keychain key that no plugin config carries. A key whose write
+    // state is unknown is not removed (it may predate this run); it is reported.
+    let leftover = uncertain;
+    if (stored) {
+      try {
+        await options.keys.remove("relay-v1");
+      } catch {
+        leftover = true;
+      }
+    }
+    throw new KeySetupError(
+      setupErrorCode(error, "relay_setup_failed"),
+      leftover ? ["relay-v1"] : [],
+    );
   } finally {
     key.fill(0);
   }
@@ -75,11 +93,12 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     setupRelayKey({ keys: createMacKeychain(), configPath, relayPort }).then(
       () => process.stdout.write(`Relay key created; plugin config written to ${configPath}\n`),
       (error: unknown) => {
-        const code =
-          error instanceof Error && /^[a-z_]{1,64}$/.test(error.message)
-            ? error.message
-            : "relay_setup_failed";
-        process.stdout.write(`Relay setup failed: ${code}\n`);
+        const code = setupErrorCode(error, "relay_setup_failed");
+        const leftover =
+          error instanceof KeySetupError && error.leftover.length > 0
+            ? ` (check Keychain account: ${error.leftover.join(", ")})`
+            : "";
+        process.stdout.write(`Relay setup failed: ${code}${leftover}\n`);
         process.exitCode = 1;
       },
     );
