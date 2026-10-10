@@ -28,6 +28,8 @@ dot のプラグイン側に API キーを登録し、Tunnel にそのまま転�
 
 ## 手順
 
+手順 2 と 3（Bearer ファイルと profile）は、bridge の `setup` コマンドがまとめて行えます（README の「6. dotから直接statusを呼べるようにする」）。`--notification-tunnel-id '<通知用 Tunnel の ID>'` を付けて実行すると、`~/.orca-dots-bridge/tunnel/service-authorization` と `~/.orca-dots-bridge/tunnel/profiles/orca-notifications.yaml` を作ります。dot 用の API キーは表示せず、Keychain の `service-v1` から直接 Bearer ファイルに書くので、手順 2 の手入力は不要です。以下は手作業で行う場合の手順です。
+
 ### 1. 通知用の Tunnel を作る（初回だけ）
 
 1. [公式の Secure MCP Tunnel ガイド](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)に従い、Platform で通知用の Tunnel を作り、個人の ChatGPT workspace に関連付けます。状態確認用とは別の Tunnel にします。

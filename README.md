@@ -4,7 +4,7 @@ Orcaで進めている作業の状態を確認し、指定した1端末に追加
 
 ## はじめてのセットアップ（Mac mini）
 
-**まず、このMacでOrcaの状態を1回読めるところまで進めます。** 手順1〜3で基本動作を確認し、必要なら4で指示送信、5でAIアシスタントへ接続します。以下のコマンドは、これから使うMacの「ターミナル」で上から順に実行してください。新しいMac miniでの実行検証はまだ行っていません。
+**まず、このMacでOrcaの状態を1回読めるところまで進めます。** 手順1〜3で基本動作を確認し、必要なら4で指示送信、5でAIアシスタントへ接続、6でdotから直接statusを呼べるようにします。以下のコマンドは、これから使うMacの「ターミナル」で上から順に実行してください。Mac mini（Orca 1.4.224）で手順1〜3と手順6を実行し、dotから`orca_status`を呼べることを確認しています。
 
 ```text
 Mac mini: Orcaアプリ（作業を実行） ← Orca CLI ← このbridge
@@ -12,7 +12,7 @@ Mac mini: Orcaアプリ（作業を実行） ← Orca CLI ← このbridge
                                     ターミナル / MCP対応アシスタント
 ```
 
-Orcaとbridgeは同じMac・同じログインユーザーで動かします。この手順ではMacBook Pro側のOrcaは操作しません。dotから直接呼ぶには、基本動作を確認した後で別途接続設定が必要です。
+Orcaとbridgeは同じMac・同じログインユーザーで動かします。この手順ではMacBook Pro側のOrcaは操作しません。dotから直接呼ぶ準備は、基本動作を確認した後で手順6の`setup`コマンドがまとめて行います。
 
 ### 1. 必要なものを用意する
 
@@ -117,13 +117,36 @@ command -v orca
 
 起動コマンド自体は`node dist/mcp.mjs`です。手動実行時に何も表示されず待つのはstdio通信待ちであり、ブラウザーで開くURLはありません。通常は手動で別起動せず、MCPクライアントに起動させます。
 
-**クラウドのdot**はこのローカル設定を自動で引き継ぎません。接続済みコンピューターのローカルタスク経由なら[dotからの呼び出し](docs/local-validation.md#dotからの呼び出し)、直接MCP接続なら下の「Secure MCP Tunnelでstatusだけを公開する」を参照してください。後者にはTunnel・個人workspace・プラグインの設定が別途必要です。
+**クラウドのdot**はこのローカル設定を自動で引き継ぎません。接続済みコンピューターのローカルタスク経由なら[dotからの呼び出し](docs/local-validation.md#dotからの呼び出し)、直接MCP接続なら下の「Secure MCP Tunnelでstatusだけを公開する」を参照してください。後者は手順6の`setup`コマンドで準備できます。
+
+### 6. dotから直接statusを呼べるようにする（setupコマンド）
+
+`setup`コマンドが、鍵・relay pluginの設定・tunnel-clientの導入・Tunnelのprofile・ログイン時の自動起動をまとめて準備します。何度実行しても同じ結果になり、自分で作っていないファイルや鍵は上書きしません。鍵は画面にもコマンド引数にも出しません。
+
+人がブラウザーで行うのは次の3つだけです（どれも初回だけ）。
+
+1. [PlatformのTunnels](https://platform.openai.com/settings/organization/tunnels)で状態確認用のTunnelを作り、個人のChatGPT workspaceに関連付けて、IDを控えます。
+2. [PlatformのAPI keys](https://platform.openai.com/settings/organization/api-keys)でruntime用のキーを作ります（Restricted、Tunnelsの**Read**と**Use**だけ）。表示されたキーをコピーします。
+3. 下のコマンドの後、[ChatGPTのプラグイン設定](https://chatgpt.com/#settings/Connectors)で「カスタム MCP サーバー」を作り、接続タイプ「トンネル」で1のTunnelを選び、認証は「認証なし」にします。
+
+```sh
+pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id '<1のTunnel ID>' --install-tunnel-client --install-agent
+pbcopy < /dev/null
+```
+
+- キーはクリップボードから直接読み、`~/.orca-dots-bridge/tunnel/control-plane-api-key`（権限600）に保存します。2行目でクリップボードを空にします。
+- tunnel-clientは版（v0.0.15）とアーカイブのSHA-256を固定して、`~/.orca-dots-bridge/tunnel-client/`に入れます。
+- `--install-agent`は、status-only（`ORCA_BRIDGE_STATUS_ONLY=1`）のTunnelをLaunchAgent（`dev.orca-dots-bridge.status-tunnel`）として登録します。ログイン時に起動し、止まっても再起動します。tunnel-clientの出力は保存しません。
+- 通知用のTunnelも使う場合は`--notification-tunnel-id '<ID>'`を足すと、通知用のprofileも作ります（通知用Tunnelは試験のときだけ手で起動します）。
+- 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
+
+自動起動を止めるときは`launchctl bootout gui/$(id -u)/dev.orca-dots-bridge.status-tunnel`を実行し、`~/Library/LaunchAgents/dev.orca-dots-bridge.status-tunnel.plist`を消します。profileはこのcheckoutの`dist/mcp.mjs`を指すので、checkoutを移動・削除した場合は`setup`を再実行してください。
 
 ### 停止・再開と、よくあるつまずき
 
 - CLIの状態確認は毎回終了します。再開はbridgeフォルダで同じコマンドを実行するだけです。新しいターミナルでは手順1・3の環境変数も設定し直します。
 - 手動起動したMCPはそのターミナルで`Ctrl+C`、クライアント管理のMCPはクライアント側で切断・停止します。再開は再接続してください。bridge停止ではOrca内のagentは停止しません。
-- Orcaを終了・再起動した場合はアプリを開き、手順1のruntime確認からやり直します。端末handleは再取得してください。自動起動・常駐化はこの手順では設定しません。
+- Orcaを終了・再起動した場合はアプリを開き、手順1のruntime確認からやり直します。端末handleは再取得してください。自動起動・常駐化するのは、手順6で`--install-agent`を指定した状態確認用のTunnelだけです。
 
 | 症状                                             | 確認すること                                                                                 |
 | ------------------------------------------------ | -------------------------------------------------------------------------------------------- |
@@ -134,6 +157,9 @@ command -v orca
 | `dist/cli.mjs`がない                             | clone先に`cd`し、`npm ci --ignore-scripts`と`npm run build`の成功を確認                      |
 | 一覧が空 / 名前で見つからない                    | Orcaで作業を開き、`overview`で対象を探す。repoと作業名は完全一致                             |
 | MCPで送信ツールが見えない                        | `ORCA_BRIDGE_ENABLE_SEND=1`にして再接続。`ORCA_BRIDGE_STATUS_ONLY=1`は送信より優先される     |
+| `setup`で`unmanaged_file_exists`                 | 手作業で作ったprofileなどがある。表示されたファイルを別の場所へ移してから再実行              |
+| `setup`で`*_mismatch` / `*_incomplete`           | 鍵とファイルが食い違っている。表示に従って両方を消し、再実行                                 |
+| `setup doctor`で`status-tunnel`が`skip`          | Tunnelが動いていない。`--install-agent`で登録するか、`launchctl print`で状態を確認           |
 | 検証で`EPERM`                                    | 実行環境の承認手順を確認。通常テストにもローカルsocket通信が必要。OSの保護機能を無効にしない |
 
 ### 自動通知は別の実験機能です
@@ -215,7 +241,7 @@ flowchart LR
 
 ## 実装状況
 
-Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
+Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。その準備（鍵・tunnel-client・profile・LaunchAgentによる常駐）は`setup`コマンド1つで行えます。音声の往復時間は別途確認してください。[ローカル検証手順](docs/local-validation.md) を同梱しています。
 
 指定セッションのターン終了・入力待ちを扱う通知実装と、最大10分・1対象の二段階試験入口を追加しました。通常版Orcaとrelay pluginで動くペイン単位の経路も追加しました（[relay pluginによる通知](docs/relay-notifications.md)、dotへの実通知は未確認）。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
 
@@ -344,6 +370,8 @@ Node と Orca は実際の絶対パスに置き換えてください。MCPの st
 
 ## Secure MCP Tunnelでstatusだけを公開する
 
+通常は「はじめてのセットアップ」の手順6（`setup`コマンド）を使ってください。この節は、同じ構成を手作業で作る場合の手順と、その背景です。`setup`はこの節と同じstatus-only起動・環境変数を空にした子プロセス・`file:`によるキー参照を使い、加えてLaunchAgentによる常駐を設定できます。
+
 状態確認には Tunnel を使わない構成（dot のローカルタスク経由）もあります。自動通知には、ここで説明するものとは別の通知用 Tunnel が必要です。どちらも[通知用Tunnelの設定](docs/notification-tunnel.md)の「Tunnel は必要か」で比べています。
 
 サーバー起動時に `ORCA_BRIDGE_STATUS_ONLY=1` を設定すると、公開ツールは `orca_status` の1件だけになります。`ORCA_BRIDGE_ENABLE_SEND=1` が同時に存在しても、送信を含む他のツールは登録されず、呼び出しも拒否します。これはMCPの公開範囲の制限であり、CLIの機能やOrca自体の権限は変更しません。statusは状態に加えて上限付きの進捗ログを返す場合があります。
@@ -379,7 +407,7 @@ health/readyはローカルの `/healthz`・`/readyz` のHTTP成功可否だけ�
 
 Tunnelがreadyになったら、個人ChatGPTのプラグイン追加から「カスタム MCP サーバーを作成」を開き、接続タイプ「トンネル」と該当Tunnelを指定します。このstdioサーバーは追加OAuthを持たないため、MCP側の認証は「認証なし」です。Tunnel runtimeキーによる認証とは別です。利用上の注意を確認して作成・接続した後、ツール一覧がRead 1件の `orca_status` だけであることを確認します。外部公開や共有は別操作です。
 
-**接続を使う間はTerminalとTunnelクライアント、Orca runtimeを稼働させておく必要があります。** Ctrl+Cで手動停止できます。期限付きキーが失効した場合は、利用者が新しいキーを用意して手動起動します。launchd登録・自動更新・キーの永続保存はこの手順には含めません。
+**接続を使う間はTerminalとTunnelクライアント、Orca runtimeを稼働させておく必要があります。** Ctrl+Cで手動停止できます。期限付きキーが失効した場合は、利用者が新しいキーを用意して手動起動します。launchd登録・自動更新・キーの永続保存はこの手作業の手順には含めません（`setup --install-agent`はキーを権限600のファイルに保存し、LaunchAgentとして登録します）。
 
 個人用プラグインからdotが子タスクを作らず `orca_status` を直接呼べることを一度検証しました。接続状態や各環境のツール提供範囲によって結果は変わります。タスク名・workspace/Tunnel ID・個人パス・実ログ・秘密情報は公開検証資料に含めていません。
 

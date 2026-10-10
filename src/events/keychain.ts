@@ -47,6 +47,19 @@ export function createMacKeychain(
     return account;
   };
   return {
+    /** Whether the account exists, without reading its secret. */
+    exists: async (account: KeyAccount) => {
+      const result = await command([
+        "find-generic-password",
+        "-s",
+        service,
+        "-a",
+        accountName(account),
+      ]);
+      if (result.code === 44) return false;
+      if (result.code !== 0) throw new Error("keychain_unavailable");
+      return true;
+    },
     read: async (account: KeyAccount) => {
       const result = await command([
         "find-generic-password",
