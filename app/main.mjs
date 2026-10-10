@@ -386,9 +386,13 @@ async function start() {
   // After an app update the status profile still points at the previous runtime.
   // Rewriting it needs no new input, so do what "セットアップを実行" would do.
   const profile = state.steps.find((s) => s.step === "status-profile");
-  const agentLoaded = state.steps.some((s) => s.step === "launch-agent" && s.status === "ok");
-  if (usesBundledRuntime && profile?.detail === "outdated" && agentLoaded)
-    await runSetup({ installAgent: true }).catch(() => undefined);
+  const loaded = (step) => state.steps.some((s) => s.step === step && s.status === "ok");
+  if (usesBundledRuntime && profile?.detail === "outdated" && loaded("launch-agent"))
+    await runSetup({
+      installAgent: true,
+      // Keep notifications on the new runtime too when they were already installed.
+      installNotifications: loaded("notification-service"),
+    }).catch(() => undefined);
   registerIpc();
   notify();
   if (overallLevel(state.steps) !== "ok") openWindow();

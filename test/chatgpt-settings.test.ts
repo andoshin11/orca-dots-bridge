@@ -87,18 +87,30 @@ describe("ChatGPT plugin settings", () => {
   test("missing or malformed settings read as defaults", async () => {
     const home = await tempHome();
     const path = chatgptSettingsPath(home);
-    expect(await readSettings(path)).toEqual({ sendEnabled: false });
+    expect(await readSettings(path)).toEqual({ sendEnabled: false, notificationsEnabled: false });
     const malformed = join(home, "malformed.json");
     await writeFile(malformed, '{"sendEnabled": "yes"');
-    expect(await readSettings(malformed)).toEqual({ sendEnabled: false });
+    expect(await readSettings(malformed)).toEqual({
+      sendEnabled: false,
+      notificationsEnabled: false,
+    });
     await writeFile(malformed, '{"sendEnabled": "yes"}');
-    expect(await readSettings(malformed)).toEqual({ sendEnabled: false });
+    expect(await readSettings(malformed)).toEqual({
+      sendEnabled: false,
+      notificationsEnabled: false,
+    });
   });
 
   test("updates persist privately and keep a value for every property", async () => {
     const path = chatgptSettingsPath(await tempHome());
-    expect(await updateSettings(path, { sendEnabled: true })).toEqual({ sendEnabled: true });
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ sendEnabled: true });
+    expect(await updateSettings(path, { sendEnabled: true })).toEqual({
+      sendEnabled: true,
+      notificationsEnabled: false,
+    });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
+      sendEnabled: true,
+      notificationsEnabled: false,
+    });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     const result = settingsReadResult(await readSettings(path));
     expect(Object.keys(result.values)).toEqual(Object.keys(result.schema.properties));
@@ -126,8 +138,13 @@ describe("ChatGPT plugin settings", () => {
       settingsTools.read,
       settingsTools.update,
     ]);
-    expect(on.get(3).result.structuredContent).toEqual({ values: { sendEnabled: true } });
-    expect(await readSettings(chatgptSettingsPath(home))).toEqual({ sendEnabled: true });
+    expect(on.get(3).result.structuredContent).toEqual({
+      values: { sendEnabled: true, notificationsEnabled: false },
+    });
+    expect(await readSettings(chatgptSettingsPath(home))).toEqual({
+      sendEnabled: true,
+      notificationsEnabled: false,
+    });
   });
 
   test("only the settings page can turn sending on; anything can turn it off", async () => {
@@ -149,11 +166,30 @@ describe("ChatGPT plugin settings", () => {
       expect(chat.get(id).result.isError).toBe(true);
       expect(chat.get(id).result.content[0].text).toContain("settings page");
     }
-    expect(await readSettings(chatgptSettingsPath(home))).toEqual({ sendEnabled: false });
+    expect(await readSettings(chatgptSettingsPath(home))).toEqual({
+      sendEnabled: false,
+      notificationsEnabled: false,
+    });
+
+    const notify = {
+      jsonrpc: "2.0",
+      id: 5,
+      method: "tools/call",
+      params: {
+        name: settingsTools.update,
+        arguments: { set: { notificationsEnabled: true } },
+        _meta: fromChat,
+      },
+    };
+    const notifyChat = await rpc(env, [initialize, initialized, notify]);
+    expect(notifyChat.get(5).result.isError).toBe(true);
+    expect((await readSettings(chatgptSettingsPath(home))).notificationsEnabled).toBe(false);
 
     await updateSettings(chatgptSettingsPath(home), { sendEnabled: true });
     const off = await rpc(env, [initialize, initialized, update(3, false, fromChat)]);
-    expect(off.get(3).result.structuredContent).toEqual({ values: { sendEnabled: false } });
+    expect(off.get(3).result.structuredContent).toEqual({
+      values: { sendEnabled: false, notificationsEnabled: false },
+    });
   });
 
   test("send is exposed but refused until the ChatGPT setting allows it", async () => {

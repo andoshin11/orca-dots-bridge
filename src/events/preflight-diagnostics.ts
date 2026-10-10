@@ -139,6 +139,10 @@ export const diagnosticStages = [
   "relay_test_received",
   "relay_status_received",
   "pane_status_queued",
+  "notifications_disabled",
+  "callback_host_rejected",
+  "subscriptions_resumed",
+  "subscriptions_dropped",
 ] as const;
 export type DiagnosticStage = (typeof diagnosticStages)[number];
 export type DiagnosticRecord = (stage: DiagnosticStage) => void;
