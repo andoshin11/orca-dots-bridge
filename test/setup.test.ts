@@ -368,7 +368,7 @@ describe("setup helpers", () => {
       orcaBin: "/opt/homebrew/bin/orca",
     });
     expect(command).toBe(
-      "/usr/bin/env -i HOME=/Users/a PATH=/usr/bin:/bin:/opt/homebrew/bin ORCA_BIN=/opt/homebrew/bin/orca ORCA_ENVIRONMENT= ORCA_PAIRING_CODE= ORCA_BRIDGE_TOOLSET=status-send ORCA_BRIDGE_ENABLE_SEND=1 ORCA_BRIDGE_CHATGPT_SETTINGS=1 /usr/local/bin/node /opt/bridge/dist/mcp.mjs",
+      "/usr/bin/env -i HOME=/Users/a PATH=/usr/bin:/bin:/opt/homebrew/bin ORCA_BIN=/opt/homebrew/bin/orca ORCA_ENVIRONMENT= ORCA_PAIRING_CODE= ORCA_BRIDGE_TOOLSET=status-send ORCA_BRIDGE_ENABLE_SEND=1 ORCA_BRIDGE_CHATGPT_SETTINGS=1 ELECTRON_RUN_AS_NODE=1 /usr/local/bin/node /opt/bridge/dist/mcp.mjs",
     );
     expect(() =>
       statusMcpCommand({ home: "/Users/a b", nodePath: "/n", distDir: "/d", orcaBin: "/o" }),

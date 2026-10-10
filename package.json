@@ -6,7 +6,7 @@
   "license": "MIT",
   "type": "module",
   "scripts": {
-    "build": "vp pack",
+    "build": "vp pack && node scripts/bundled-licenses.mjs",
     "check": "vp check",
     "lint": "vp lint",
     "format": "vp fmt",
