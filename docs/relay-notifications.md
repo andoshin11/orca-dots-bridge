@@ -1,6 +1,6 @@
 # relay plugin による通知（ペイン単位）
 
-通常版の Orca で、ターン終了・入力待ちを dot に通知するための経路です。改造版 Orca の専用 RPC は使いません。代わりに Orca plugin [orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay) がエージェントの状態変化を bridge に送り、bridge がそれを既存の二段階試験の入口から dot に届けます。
+通常版の Orca で、ターン終了・入力待ちを dot に通知するための経路です。改造版 Orca の専用 RPC は使いません。代わりに Orca の experimental plugin [orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay) がエージェントの状態変化を bridge に送り、bridge がそれを既存の二段階試験の入口から dot に届けます。
 
 ```text
 Orca ── agent.status.changed ──▶ orca-agent-status-relay（Orca plugin）
@@ -126,7 +126,7 @@ ORCA_BIN="$(command -v orca)" node dist/cli.mjs pane-target --handle '<terminal 
 - イベントを受けるたびに `orca terminal show` で対象のペインを読み直します。worktree・ペイン・handle・`incarnationId` のどれかが承認時と違えば、`monitoring_interrupted`（`identity_changed`）を送って監視を止めます。Orca CLI から読めなければ `target_unavailable` で止めます。
 - 同じ状態を relay plugin が重複して送っても、`eventId`（ペイン・状態・`mainAgent.stateStartedAt` から作る）が同じになるので、dot には 1 回だけ届きます。Orca のイベントに `mainAgent` がない場合は受信時刻で作るため、重複がそのまま届くことがあります。
 - bridge 自身がイベントを処理しきれない場合（Orca CLI の応答待ちで 16 件以上たまった、状態の保存に失敗した）は、`monitoring_interrupted`（`queue_limit` / `ingest_failed`）を送って監視を止めます。ただし、dot の webhook が受け付けず送信待ちが上限（購読ごとに 16 件）に達している場合は、停止の通知も積めずに失われます（届け先が受け付けていない状態なので、積めても届きません）。どの場合も、診断には `monitoring_stopped` が記録されます。
-- 試験の期限（最長 10 分）・1 対象・承認の流れ・送信先ホストの制限は、既存の経路と同じです。
+- 試験の期限（承認から最長 10 分で自動停止）・1 対象・承認の流れ・送信先ホストの制限は、既存の経路と同じです。
 
 ## 注意点
 
