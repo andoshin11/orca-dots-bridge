@@ -4,7 +4,7 @@ Orcaで進めている作業の状態を確認し、指定した1端末に追加
 
 ## はじめてのセットアップ（Mac mini）
 
-**まず、このMacでOrcaの状態を1回読めるところまで進めます。** 手順1〜3で基本動作を確認し、必要なら4で指示送信、5でAIアシスタントへ接続、6でdotから直接statusを呼べるようにします。以下のコマンドは、これから使うMacの「ターミナル」で上から順に実行してください。Mac mini（Orca 1.4.224）で手順1〜3と手順6を実行し、dotから`orca_status`を呼べることを確認しています。
+**まず、このMacでOrcaの状態を1回読めるところまで進めます。** 手順1〜3で基本動作を確認し、必要なら4で指示送信、5でAIアシスタントへ接続、6でdotから直接statusを呼べるようにします。6は7のメニューバーアプリからも行えます。以下のコマンドは、これから使うMacの「ターミナル」で上から順に実行してください。Mac mini（Orca 1.4.224）で手順1〜3と手順6を実行し、dotから`orca_status`を呼べることを確認しています。
 
 ```text
 Mac mini: Orcaアプリ（作業を実行） ← Orca CLI ← このbridge
@@ -141,6 +141,23 @@ pbcopy < /dev/null
 - 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
 
 自動起動を止めるときは`launchctl bootout gui/$(id -u)/dev.orca-dots-bridge.status-tunnel`を実行し、`~/Library/LaunchAgents/dev.orca-dots-bridge.status-tunnel.plist`を消します。profileはこのcheckoutの`dist/mcp.mjs`を指すので、checkoutを移動・削除した場合は`setup`を再実行してください。
+
+### 7. メニューバーアプリで準備・確認する（任意）
+
+手順6の`setup`を画面から行う、macOS のメニューバーアプリ（Electron）を`app/`に同梱しています。メニューバーに状態（`Orca ✓` / `Orca !` / `Orca ✕`）を表示し、状態確認用 Tunnel の稼働を30秒ごと、`setup doctor`相当の確認を10分ごとに行います。
+
+```sh
+cd app
+npm ci
+npm run package
+open "out/Orca Dots Bridge-darwin-arm64/Orca Dots Bridge.app"
+```
+
+- 画面の手順に沿って、Tunnel ID の貼り付け → runtime キーのコピー →「セットアップを実行」→ ChatGPT のプラグイン作成、と進めます。Platform・ChatGPT の該当ページはボタンで開けます。
+- runtime キーはクリップボードから main プロセスが直接読み、保存できたらクリップボードを空にします。画面（renderer）にはキーを渡しません。クリップボードの中身が runtime キーの形式でなければ、読み取りも消去もしません。
+- 「ログイン時に起動」をオンにすると、アプリ自体もログイン時に起動します（状態確認用 Tunnel の自動起動とは別です。Tunnel はアプリを起動していなくても LaunchAgent で動きます）。
+- アプリはビルドしたときの bridge の checkout（`dist/setup.mjs`）を使います。checkout を移動したら`npm run package`をやり直してください。開発中は`npm start`でも起動できます。
+- 署名していないアプリです。ほかの Mac へ配る用途は想定していません。
 
 ### 停止・再開と、よくあるつまずき
 

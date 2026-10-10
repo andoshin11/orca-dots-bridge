@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
   parseSetupArgs,
+  recordedNodePath,
   runSetup,
   setupPaths,
   statusMcpCommand,
@@ -53,6 +54,7 @@ async function fakeIo(overrides: Partial<SetupIo> = {}) {
     },
     exec: async (file, args) => {
       calls.push({ file, args });
+      if (args[0] === "--version") return { code: 0, stdout: "v24.11.0\n" };
       if (file === orca)
         return {
           code: 0,
@@ -277,6 +279,54 @@ describe("setup after review", () => {
     const order = calls.filter((c) => c.file === "/bin/launchctl").map((c) => c.args[0]);
     expect(order.indexOf("bootout")).toBeLessThan(order.lastIndexOf("bootstrap"));
     expect(agent.loaded).toBe(true);
+  });
+});
+
+describe("setup with several Node paths", () => {
+  test("keeps the Node recorded in the managed profile while it still runs", async () => {
+    const { io, paths } = await fakeIo();
+    const first = join(io.home, "node-a");
+    await executable(first);
+    await runSetup({ ...io, nodePath: first }, full);
+    const { steps } = await runSetup({ ...io, nodePath: "/elsewhere/node" }, { mode: "setup" });
+    expect(steps.find((s) => s.step === "status-profile")?.status).toBe("ok");
+    expect(recordedNodePath(await readFile(paths.statusProfile, "utf8"))).toBe(first);
+  });
+
+  test("falls back to the current Node when the recorded one is gone", async () => {
+    const { io, paths } = await fakeIo();
+    await runSetup({ ...io, nodePath: join(io.home, "missing-node") }, full);
+    const { steps } = await runSetup(io, { mode: "setup" });
+    expect(steps.find((s) => s.step === "status-profile")?.status).toBe("updated");
+    expect(recordedNodePath(await readFile(paths.statusProfile, "utf8"))).toBe(io.nodePath);
+  });
+});
+
+describe("recorded Node edge cases", () => {
+  test("an unparsable command line is treated as no recorded Node", () => {
+    const marker = "# managed by orca-dots-bridge setup";
+    expect(recordedNodePath(`${marker}\n      command: '/bin/node /d/mcp.mjs'\n`)).toBeUndefined();
+    expect(recordedNodePath(`${marker}\n      command: 42\n`)).toBeUndefined();
+    expect(recordedNodePath('command: "/usr/bin/env -i /n /d/mcp.mjs"')).toBeUndefined();
+  });
+
+  test("an old recorded Node or an explicit one is not kept", async () => {
+    const { io, paths } = await fakeIo();
+    const old = join(io.home, "node-old");
+    await executable(old);
+    await runSetup({ ...io, nodePath: old }, full);
+    const oldIo: SetupIo = {
+      ...io,
+      exec: async (file, args) =>
+        file === old && args[0] === "--version"
+          ? { code: 0, stdout: "v18.0.0\n" }
+          : io.exec(file, args),
+    };
+    await runSetup(oldIo, { mode: "setup" });
+    expect(recordedNodePath(await readFile(paths.statusProfile, "utf8"))).toBe(io.nodePath);
+    const chosen = join(io.home, "node-chosen");
+    await runSetup(io, { mode: "setup", nodePath: chosen });
+    expect(recordedNodePath(await readFile(paths.statusProfile, "utf8"))).toBe(chosen);
   });
 });
 
