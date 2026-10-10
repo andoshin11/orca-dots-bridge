@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'"
+    />
+    <title>Orca → dot</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Orca → dot</h1>
+      <p id="headline" class="muted">確認中…</p>
+    </header>
+
+    <section>
+      <div class="row">
+        <h2>状態</h2>
+        <button id="doctor" type="button">再確認</button>
+      </div>
+      <table id="steps"></table>
+      <p id="checked" class="muted small"></p>
+    </section>
+
+    <section>
+      <h2>セットアップ</h2>
+      <ol class="setup">
+        <li>
+          <h3>状態確認用の Tunnel を作る（初回だけ）</h3>
+          <p>
+            Platform の Tunnels で Tunnel を作り、個人の ChatGPT workspace に関連付けます。作った
+            Tunnel の ID を貼り付けてください。
+          </p>
+          <div class="row">
+            <button type="button" data-open="tunnels">Tunnels を開く</button>
+            <input id="statusTunnelId" placeholder="tunnel_..." spellcheck="false" />
+          </div>
+          <details>
+            <summary>通知用の Tunnel も使う</summary>
+            <input id="notificationTunnelId" placeholder="tunnel_..." spellcheck="false" />
+          </details>
+        </li>
+        <li>
+          <h3>runtime キーを作る（初回だけ）</h3>
+          <p>
+            Platform の API keys で、権限を Restricted・Tunnels の <b>Read</b> と <b>Use</b>
+            だけにしたキーを作り、<b>コピー</b>してください。キーはこの画面には表示されず、クリップボードから直接保存したあとクリップボードを空にします。
+          </p>
+          <div class="row">
+            <button type="button" data-open="apiKeys">API keys を開く</button>
+            <label><input id="useClipboardKey" type="checkbox" /> コピーしたキーを使う</label>
+          </div>
+        </li>
+        <li>
+          <h3>この Mac を準備する</h3>
+          <label
+            ><input id="installTunnelClient" type="checkbox" checked /> tunnel-client
+            を入れる（版とハッシュを固定）</label
+          >
+          <label
+            ><input id="installAgent" type="checkbox" checked /> 状態確認用の Tunnel
+            をログイン時に自動起動する</label
+          >
+          <div class="row">
+            <button id="run" type="button" class="primary">セットアップを実行</button>
+            <span id="result" class="small"></span>
+          </div>
+        </li>
+        <li>
+          <h3>ChatGPT にプラグインを作る（初回だけ）</h3>
+          <p>
+            ChatGPT のプラグイン設定で「カスタム MCP サーバー」を作り、接続タイプ「トンネル」で次の
+            Tunnel を選び、認証は「認証なし」にします。
+          </p>
+          <div class="row">
+            <code id="pluginTunnel">—</code>
+            <button id="copyTunnel" type="button">ID をコピー</button>
+            <button type="button" data-open="connectors">プラグイン設定を開く</button>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section>
+      <h2>操作</h2>
+      <div class="row">
+        <button id="restart" type="button">Tunnel を再起動</button>
+        <label id="loginItemRow" hidden
+          ><input id="openAtLogin" type="checkbox" /> このアプリをログイン時に起動</label
+        >
+      </div>
+      <p id="paths" class="muted small"></p>
+    </section>
+
+    <script src="renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "orca-dots-bridge-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Menu bar app that sets up and watches the Orca → dot bridge",
+  "license": "MIT",
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "start": "electron .",
+    "package": "node scripts/package.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "20.3.0",
+    "electron": "44.4.5"
+  }
+}
