@@ -4,11 +4,11 @@
 
 _A bridge that lets ChatGPT (dot) check the status of agents running in Orca on your Mac, and optionally send one explicit instruction to one agent. macOS only._
 
-| 機能                                              | 状態                                                                                                                                                                                                                                                                                             |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| dot から Orca の状態を確認する                    | 利用可能                                                                                                                                                                                                                                                                                         |
-| dot から1つのエージェントへ追加の指示を送る       | 利用可能・既定はオフ（ChatGPT のプラグイン設定で許可。実エージェントへの送信は未検証）                                                                                                                                                                                                           |
-| エージェントのターン終了などを dot へ自動通知する | Orca の experimental plugin（[orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay)）を利用。いまは試験用の実装で、1回の起動で通知できるのは1つのペインだけ、承認から10分で自動的に止まります。[詳細](docs/architecture.md#自動通知orca-の-experimental-plugin-を利用) |
+| 機能                                              | 状態                                                                                                                                                                                                                                       |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| dot から Orca の状態を確認する                    | 利用可能                                                                                                                                                                                                                                   |
+| dot から1つのエージェントへ追加の指示を送る       | 利用可能・既定はオフ（ChatGPT のプラグイン設定で許可。実エージェントへの送信は未検証）                                                                                                                                                     |
+| エージェントのターン終了などを dot へ自動通知する | Orca の experimental plugin（[orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay)）を利用。ペイン単位で、既定はオフ（ChatGPT のプラグイン設定で許可）。dot への到達は確認中です。[詳細](docs/notifications.md) |
 
 ## アーキテクチャ
 
@@ -48,6 +48,7 @@ flowchart LR
    3. 「セットアップを実行」を押す（tunnel-client の導入と、ログイン時の自動起動まで行います）
    4. ChatGPT で「カスタム MCP サーバー」を追加する（接続タイプはトンネル、認証なし）
 3. **dot から使う。** 「Orca の ○○ の作業はどうなってる？」のように聞きます。指示も送りたい場合は、ChatGPT のプラグイン管理画面で「指示の送信を許可」をオンにします。
+4. **（任意）自動通知を使う。** Orca に relay plugin を入れ、アプリで通知用の Tunnel ID を入れて「通知サービスと通知用の Tunnel を常駐させる」をオンにし、ChatGPT のプラグイン設定で「通知を受け取る」をオンにします。手順は[自動通知](docs/notifications.md)を参照してください。
 
 runtime キーの期限が近づいたら、新しいキーをコピーしてアプリの「コピーした新しいキーに入れ替える」で入れ替えます。うまく動かないときは[よくあるつまずき](docs/troubleshooting.md)を参照してください。
 
@@ -64,14 +65,14 @@ pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id <Tunnel ID>
 
 ## ドキュメント
 
-| 文書                                                                                                                                | 内容                                                         |
-| ----------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
-| [メニューバーアプリ](docs/menu-bar-app.md)                                                                                          | 置き場所、更新、キーの扱い                                   |
-| [ChatGPT（dot）から使う](docs/chatgpt-tunnel.md)                                                                                    | `setup` の詳細、プラグイン設定、手作業での Tunnel 構成       |
-| [CLI で使う](docs/cli.md)                                                                                                           | CLI のリファレンス、MCP クライアントからの利用、状態の読み方 |
-| [アーキテクチャと実装状況](docs/architecture.md)                                                                                    | 通信経路、認証、検証の範囲                                   |
-| [自動通知](docs/notifications-design.md)・[relay plugin](docs/relay-notifications.md)・[通知用 Tunnel](docs/notification-tunnel.md) | 自動通知（Orca の experimental plugin を利用）               |
-| [開発](docs/development.md)                                                                                                         | ビルド、テスト、リリース                                     |
+| 文書                                             | 内容                                                                                                                                                        |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [メニューバーアプリ](docs/menu-bar-app.md)       | 置き場所、更新、キーの扱い                                                                                                                                  |
+| [ChatGPT（dot）から使う](docs/chatgpt-tunnel.md) | `setup` の詳細、プラグイン設定、手作業での Tunnel 構成                                                                                                      |
+| [CLI で使う](docs/cli.md)                        | CLI のリファレンス、MCP クライアントからの利用、状態の読み方                                                                                                |
+| [アーキテクチャと実装状況](docs/architecture.md) | 通信経路、認証、検証の範囲                                                                                                                                  |
+| [自動通知](docs/notifications.md)                | 準備と使い方、制約（[relay plugin](docs/relay-notifications.md)・[実装と検証](docs/notifications-design.md)・[通知用 Tunnel](docs/notification-tunnel.md)） |
+| [開発](docs/development.md)                      | ビルド、テスト、リリース                                                                                                                                    |
 
 ## ライセンス
 

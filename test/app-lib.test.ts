@@ -43,6 +43,7 @@ describe("menu bar app helpers", () => {
       replaceRuntimeKey: false,
       installTunnelClient: false,
       installAgent: false,
+      installNotifications: false,
     });
     expect(parseSetupRequest({ useClipboardKey: true, replaceRuntimeKey: true })).toMatchObject({
       replaceRuntimeKey: true,

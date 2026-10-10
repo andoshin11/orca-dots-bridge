@@ -26,10 +26,16 @@ const properties = {
     description:
       "オンにすると、dot から Orca のエージェント1つへ追加の指示を送れます。送る前に ChatGPT が確認します。",
   },
+  notificationsEnabled: {
+    type: "boolean",
+    title: "通知を受け取る",
+    description:
+      "オンにすると、dot に頼んだ Orca のペインのターン終了・入力待ちを通知します（通知用 Tunnel と、この Mac の通知サービスが必要です）。オフにすると購読をすべて止めます。",
+  },
 } as const;
-export type ChatgptSettings = { sendEnabled: boolean };
+export type ChatgptSettings = { sendEnabled: boolean; notificationsEnabled: boolean };
 // Everything that widens what ChatGPT can do starts off.
-const defaults: ChatgptSettings = { sendEnabled: false };
+const defaults: ChatgptSettings = { sendEnabled: false, notificationsEnabled: false };
 
 export function chatgptSettingsPath(home = homedir()) {
   return join(home, ".orca-dots-bridge", "chatgpt-settings.json");
@@ -44,9 +50,14 @@ export async function readSettings(path: string): Promise<ChatgptSettings> {
   } catch {
     return { ...defaults };
   }
-  const values = typeof parsed === "object" && parsed !== null ? parsed : {};
-  const send = (values as Record<string, unknown>).sendEnabled;
-  return { sendEnabled: send === true };
+  const values = (typeof parsed === "object" && parsed !== null ? parsed : {}) as Record<
+    string,
+    unknown
+  >;
+  return {
+    sendEnabled: values.sendEnabled === true,
+    notificationsEnabled: values.notificationsEnabled === true,
+  };
 }
 
 async function writeSettings(path: string, values: ChatgptSettings) {
@@ -66,12 +77,19 @@ export function settingsReadResult(values: ChatgptSettings) {
         title: "Orca への操作",
         items: [{ kind: "property" as const, property: "sendEnabled" }],
       },
+      {
+        kind: "group" as const,
+        title: "通知",
+        items: [{ kind: "property" as const, property: "notificationsEnabled" }],
+      },
     ],
   };
 }
 
 export const updateShape = {
-  set: z.object({ sendEnabled: z.boolean().optional() }).strict(),
+  set: z
+    .object({ sendEnabled: z.boolean().optional(), notificationsEnabled: z.boolean().optional() })
+    .strict(),
 };
 
 export async function updateSettings(path: string, set: Partial<ChatgptSettings>) {
@@ -141,10 +159,14 @@ export function registerChatgptSettings(server: McpServer, path = chatgptSetting
       },
     },
     async ({ set }, extra) => {
-      if (set.sendEnabled === true && !fromSettingsPage(extra._meta))
+      // Anything that widens access can only be turned on from the settings page.
+      if (
+        (set.sendEnabled === true || set.notificationsEnabled === true) &&
+        !fromSettingsPage(extra._meta)
+      )
         throw new BridgeError(
           "settings_page_only",
-          "Turning on sending is only accepted from this plugin's settings page in ChatGPT. Ask the user to turn it on there.",
+          "Turning this on is only accepted from this plugin's settings page in ChatGPT. Ask the user to turn it on there.",
         );
       return structured({ values: await updateSettings(path, set) });
     },
