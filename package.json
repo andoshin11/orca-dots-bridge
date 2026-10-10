@@ -2,8 +2,27 @@
   "name": "orca-dots-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Orca visibility and explicit single-agent instruction bridge",
+  "description": "Lets ChatGPT (dot) check Orca agent status on your Mac and send one explicit instruction to one agent",
+  "keywords": [
+    "chatgpt",
+    "macos",
+    "mcp",
+    "model-context-protocol",
+    "orca",
+    "secure-mcp-tunnel"
+  ],
+  "homepage": "https://github.com/andoshin11/orca-dots-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/andoshin11/orca-dots-bridge/issues"
+  },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/andoshin11/orca-dots-bridge.git"
+  },
+  "os": [
+    "darwin"
+  ],
   "type": "module",
   "scripts": {
     "build": "vp pack && node scripts/bundled-licenses.mjs",
