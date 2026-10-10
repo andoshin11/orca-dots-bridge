@@ -1,4 +1,5 @@
 const $ = (id) => document.getElementById(id);
+let runtimeKeyStored = false;
 const statusText = {
   ok: "OK",
   created: "作成",
@@ -45,8 +46,11 @@ function render(state) {
   const runtimeReady = state.steps.some(
     (s) => s.step === "runtime-key" && ["ok", "created"].includes(s.status),
   );
-  if (runtimeReady) $("useClipboardKey").checked = false;
-  $("useClipboardKey").disabled = runtimeReady;
+  // With a stored key, the same checkbox rotates it to the copied one.
+  $("useClipboardKeyLabel").textContent = runtimeReady
+    ? " コピーした新しいキーに入れ替える"
+    : " コピーしたキーを使う";
+  runtimeKeyStored = runtimeReady;
   for (const button of document.querySelectorAll("button")) button.disabled = state.busy;
   $("copyTunnel").disabled = !tunnel || state.busy;
   $("restart").disabled =
@@ -70,6 +74,7 @@ $("run").addEventListener("click", async () => {
     statusTunnelId: $("statusTunnelId").value,
     notificationTunnelId: $("notificationTunnelId").value,
     useClipboardKey: $("useClipboardKey").checked,
+    replaceRuntimeKey: runtimeKeyStored,
     installTunnelClient: $("installTunnelClient").checked,
     installAgent: $("installAgent").checked,
   });
@@ -79,6 +84,7 @@ $("run").addEventListener("click", async () => {
     $("result").textContent = errors ? `${errors} 件のエラーがあります。` : "完了しました。";
     $("statusTunnelId").value = "";
     $("notificationTunnelId").value = "";
+    $("useClipboardKey").checked = false;
   }
   render(response.state);
 });

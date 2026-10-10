@@ -27,5 +27,6 @@ export default defineConfig({
     dts: false,
     sourcemap: true,
   },
-  test: { include: ["test/**/*.test.ts"], testTimeout: 10000 },
+  // Tests that spawn dist/*.mjs share one build made before any test runs.
+  test: { include: ["test/**/*.test.ts"], testTimeout: 10000, globalSetup: ["test/build-once.ts"] },
 });
