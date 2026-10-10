@@ -12,8 +12,14 @@ import {
   serialize,
 } from "./service.js";
 import { errorResult } from "./errors.js";
-import { registerChatgptSettings, settingsCapability } from "./chatgpt-settings.js";
-// Opt-in trial of OpenAI MCP Extensions structured settings on the ChatGPT plugin page.
+import {
+  assertSendAllowed,
+  chatgptSettingsPath,
+  registerChatgptSettings,
+  settingsCapability,
+} from "./chatgpt-settings.js";
+// Opt-in: settings on the ChatGPT plugin page (OpenAI MCP Extensions). When on,
+// sending also requires the 指示の送信を許可 setting, checked on every call.
 const chatgptSettings = process.env.ORCA_BRIDGE_CHATGPT_SETTINGS === "1";
 const server = new McpServer(
   { name: "orca-dots-bridge", version: "0.1.0" },
@@ -124,7 +130,10 @@ if (sendEnabled) {
         openWorldHint: true,
       },
     },
-    wrap((i) => bridge.send(exposedSendSchema.parse(i))),
+    wrap(async (i) => {
+      if (chatgptSettings) await assertSendAllowed(chatgptSettingsPath());
+      return bridge.send(exposedSendSchema.parse(i));
+    }),
   );
 }
 if (chatgptSettings) registerChatgptSettings(server);

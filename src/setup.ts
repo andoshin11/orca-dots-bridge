@@ -131,7 +131,10 @@ export function statusMcpCommand(input: {
     `ORCA_BIN=${orca}`,
     "ORCA_ENVIRONMENT=",
     "ORCA_PAIRING_CODE=",
-    "ORCA_BRIDGE_STATUS_ONLY=1",
+    // Status plus one-target send; send stays refused until the ChatGPT setting allows it.
+    "ORCA_BRIDGE_TOOLSET=status-send",
+    "ORCA_BRIDGE_ENABLE_SEND=1",
+    "ORCA_BRIDGE_CHATGPT_SETTINGS=1",
     plainPath(input.nodePath),
     plainPath(join(input.distDir, "mcp.mjs")),
   ].join(" ");
@@ -651,6 +654,10 @@ export function nextActions(steps: Step[], settings: Partial<Settings>) {
   if (status("status-tunnel") === "ok" && settings.statusTunnelId)
     actions.push(
       `If not done yet, add the plugin once at ${setupUrls.connectors}: custom MCP server, connection type Tunnel (${settings.statusTunnelId}), authentication none`,
+    );
+  if (["created", "updated"].includes(status("status-profile") ?? "") && settings.statusTunnelId)
+    actions.push(
+      "The plugin's tools changed: in ChatGPT open the plugin's manage page and press ツールを更新 once. Sending stays off until you turn on 指示の送信を許可 in the plugin settings there.",
     );
   return actions;
 }
