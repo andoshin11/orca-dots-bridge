@@ -91,8 +91,9 @@ export async function assertSendAllowed(path: string) {
 
 /**
  * ChatGPT's settings page calls carry `openai/action_name` and no `openai/session`;
- * calls the model makes in chat carry `openai/session`. The model controls only
- * arguments, not this metadata. This is observed behavior, not documented, so any
+ * calls the model makes in chat carry `openai/session` (observed October 2026). The
+ * model appears to control only arguments, not this metadata. This is observed, not
+ * documented, behavior, so any
  * change makes enabling fail (closed) rather than open. `_meta.ui.visibility: ["app"]`
  * cannot be used instead: it hides the tools from the settings page as well.
  */

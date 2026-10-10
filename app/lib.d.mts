@@ -1,6 +1,7 @@
 export type Step = { step: string; status: string; detail: string };
 export type SetupRequest = {
   useClipboardKey: boolean;
+  replaceRuntimeKey: boolean;
   installTunnelClient: boolean;
   installAgent: boolean;
   statusTunnelId?: string;
