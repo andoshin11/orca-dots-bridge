@@ -103,6 +103,8 @@ export type SetupOptions = {
   runtimeKey?: string;
   installTunnelClient?: boolean;
   installAgent?: boolean;
+  /** Node binary for the status Tunnel, used instead of one recorded in the profile. */
+  nodePath?: string;
 };
 
 const yaml = (value: string) => JSON.stringify(value);
@@ -165,6 +167,23 @@ export function renderStatusProfile(paths: SetupPaths, tunnelId: string, command
   ].join("\n");
 }
 
+/** The Node binary a managed status profile runs, if the file is one this command wrote. */
+export function recordedNodePath(profile: string | undefined) {
+  if (!profile?.includes(managedMarker)) return undefined;
+  const line = profile.split("\n").find((l) => l.trimStart().startsWith("command: "));
+  if (!line) return undefined;
+  let command: unknown;
+  try {
+    command = JSON.parse(line.trim().slice("command: ".length));
+  } catch {
+    return undefined;
+  }
+  if (typeof command !== "string") return undefined;
+  const tokens = command.split(" ");
+  const node = tokens[tokens.length - 2];
+  return node?.startsWith("/") ? node : undefined;
+}
+
 export function renderNotificationProfile(paths: SetupPaths, tunnelId: string) {
   return [
     ...profileHeader(tunnelId, paths.runtimeKey, paths.notificationHealthUrl),
@@ -212,6 +231,14 @@ const executable = (path: string) =>
     () => false,
   );
 const readText = (path: string) => readFile(path, "utf8").catch(() => undefined);
+
+/** Whether a path runs a Node release the bridge supports (22 or later). */
+async function supportedNode(io: SetupIo, path: string) {
+  if (!(await executable(path))) return false;
+  const result = await io.exec(path, ["--version"]).catch(() => undefined);
+  const major = Number(result?.stdout.trim().replace(/^v/, "").split(".")[0]);
+  return result?.code === 0 && major >= 22;
+}
 
 async function writeOwnerOnly(path: string, content: string, flag: "w" | "wx" = "wx") {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
@@ -505,12 +532,17 @@ export async function runSetup(
     if (!next.statusTunnelId)
       return add("status-profile", "action", `pass --status-tunnel-id (see ${setupUrls.tunnels})`);
     if (!orcaBin) return add("status-profile", "action", "needs the Orca CLI");
-    const command = statusMcpCommand({
-      home: io.home,
-      nodePath: io.nodePath,
-      distDir: io.distDir,
-      orcaBin,
-    });
+    // The CLI and the app may see the same Node under different paths; keeping a
+    // recorded one that still runs avoids rewriting the profile and restarting the Tunnel.
+    // An explicit Node (options.nodePath) always wins.
+    const recorded = options.nodePath
+      ? undefined
+      : recordedNodePath(await readText(paths.statusProfile));
+    const nodePath =
+      recorded && (await supportedNode(io, recorded))
+        ? recorded
+        : (options.nodePath ?? io.nodePath);
+    const command = statusMcpCommand({ home: io.home, nodePath, distDir: io.distDir, orcaBin });
     await managedStep(
       "status-profile",
       paths.statusProfile,
@@ -623,6 +655,35 @@ export function nextActions(steps: Step[], settings: Partial<Settings>) {
   return actions;
 }
 
+/**
+ * The real macOS wiring (Keychain, child processes, network). The GUI app passes
+ * the bridge dist directory and a real Node binary, since its own execPath is Electron.
+ */
+export function systemSetupIo(input: {
+  distDir: string;
+  nodePath?: string;
+  env?: Record<string, string | undefined>;
+}): SetupIo {
+  return {
+    home: homedir(),
+    platform: process.platform,
+    arch: process.arch,
+    uid: process.getuid?.() ?? -1,
+    env: input.env ?? process.env,
+    nodePath: input.nodePath ?? process.execPath,
+    distDir: input.distDir,
+    keys: createMacKeychain(),
+    exec,
+    download: async (url) => {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error("tunnel_client_download_failed");
+      return Buffer.from(await response.arrayBuffer());
+    },
+    probe: async (url) => (await fetch(url, { signal: AbortSignal.timeout(3000) })).status,
+    sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
+  };
+}
+
 function exec(file: string, args: string[], env?: Record<string, string>): Promise<ExecResult> {
   return new Promise((resolveExec, reject) => {
     const child = spawn(file, args, {
@@ -713,26 +774,8 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       }
       options.runtimeKey = await readStdin();
     }
-    const home = homedir();
     const { steps, settings } = await runSetup(
-      {
-        home,
-        platform: process.platform,
-        arch: process.arch,
-        uid: process.getuid?.() ?? -1,
-        env: process.env,
-        nodePath: process.execPath,
-        distDir: dirname(fileURLToPath(import.meta.url)),
-        keys: createMacKeychain(),
-        exec,
-        download: async (url) => {
-          const response = await fetch(url);
-          if (!response.ok) throw new Error("tunnel_client_download_failed");
-          return Buffer.from(await response.arrayBuffer());
-        },
-        probe: async (url) => (await fetch(url, { signal: AbortSignal.timeout(3000) })).status,
-        sleep: (ms) => new Promise((done) => setTimeout(done, ms)),
-      },
+      systemSetupIo({ distDir: dirname(fileURLToPath(import.meta.url)) }),
       options,
     );
     const actions = nextActions(steps, settings);

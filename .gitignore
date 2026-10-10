@@ -13,3 +13,5 @@ coverage/
 *.pem
 *.key
 .DS_Store
+app/out/
+app/bridge-location.json
