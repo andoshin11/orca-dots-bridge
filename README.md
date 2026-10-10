@@ -127,7 +127,7 @@ command -v orca
 
 1. [PlatformのTunnels](https://platform.openai.com/settings/organization/tunnels)で状態確認用のTunnelを作り、個人のChatGPT workspaceに関連付けて、IDを控えます。
 2. [PlatformのAPI keys](https://platform.openai.com/settings/organization/api-keys)でruntime用のキーを作ります（Restricted、Tunnelsの**Read**と**Use**だけ）。表示されたキーをコピーします。
-3. 下のコマンドの後、[ChatGPTのプラグイン設定](https://chatgpt.com/#settings/Connectors)で「カスタム MCP サーバー」を作り、接続タイプ「トンネル」で1のTunnelを選び、認証は「認証なし」にします。
+3. 下のコマンドの後、[ChatGPTのプラグイン画面](https://chatgpt.com/plugins)の「追加」から「カスタム MCP サーバーを追加」を開き、接続タイプ「トンネル」で1のTunnelを選び、認証は「認証なし」にします。
 
 ```sh
 pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id '<1のTunnel ID>' --install-tunnel-client --install-agent
@@ -153,7 +153,7 @@ npm run package
 open "out/Orca Dots Bridge-darwin-arm64/Orca Dots Bridge.app"
 ```
 
-- 画面の手順に沿って、Tunnel ID の貼り付け → runtime キーのコピー →「セットアップを実行」→ ChatGPT のプラグイン作成、と進めます。Platform・ChatGPT の該当ページはボタンで開けます。
+- 画面の手順に沿って、Tunnel ID の貼り付け → runtime キーのコピー →「セットアップを実行」→ ChatGPT のプラグイン作成、と進めます。Platform・ChatGPT の該当ページはボタンで開けます。各手順には、押す場所に赤枠を付けた Platform・ChatGPT 画面のスクリーンショット（`app/images/`、ID などの識別子は塗りつぶし済み）を載せています。画像を押すと拡大します。
 - runtime キーはクリップボードから main プロセスが直接読み、保存できたらクリップボードを空にします。画面（renderer）にはキーを渡しません。クリップボードの中身が runtime キーの形式でなければ、読み取りも消去もしません。
 - 「ログイン時に起動」をオンにすると、アプリ自体もログイン時に起動します（状態確認用 Tunnel の自動起動とは別です。Tunnel はアプリを起動していなくても LaunchAgent で動きます）。
 - アプリはビルドしたときの bridge の checkout（`dist/setup.mjs`）を使います。checkout を移動したら`npm run package`をやり直してください。開発中は`npm start`でも起動できます。

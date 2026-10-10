@@ -215,7 +215,7 @@ function buildMenu(level) {
       click: () => void restartAgent().catch(() => undefined),
     },
     {
-      label: "ChatGPT のプラグイン設定を開く",
+      label: "ChatGPT のプラグイン画面を開く",
       click: () => void shell.openExternal(setup.setupUrls.connectors),
     },
     { type: "separator" },
