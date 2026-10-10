@@ -4,11 +4,11 @@
 
 _A bridge that lets ChatGPT (dot) check the status of agents running in Orca on your Mac, and optionally send one explicit instruction to one agent. macOS only._
 
-| 機能                                              | 状態                                                                                   |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| dot から Orca の状態を確認する                    | 利用可能（Secure MCP Tunnel 経由で実機検証済み）                                       |
-| dot から1つのエージェントへ追加の指示を送る       | 利用可能・既定はオフ（ChatGPT のプラグイン設定で許可。実エージェントへの送信は未検証） |
-| エージェントのターン終了などを dot へ自動通知する | 実験的（最長10分・1対象の試験のみ。[詳細](docs/architecture.md#自動通知実験的)）       |
+| 機能                                              | 状態                                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| dot から Orca の状態を確認する                    | 利用可能                                                                                                                                                                                                                                                                                         |
+| dot から1つのエージェントへ追加の指示を送る       | 利用可能・既定はオフ（ChatGPT のプラグイン設定で許可。実エージェントへの送信は未検証）                                                                                                                                                                                                           |
+| エージェントのターン終了などを dot へ自動通知する | Orca の experimental plugin（[orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay)）を利用。いまは試験用の実装で、1回の起動で通知できるのは1つのペインだけ、承認から10分で自動的に止まります。[詳細](docs/architecture.md#自動通知orca-の-experimental-plugin-を利用) |
 
 ## アーキテクチャ
 
@@ -70,7 +70,7 @@ pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id <Tunnel ID>
 | [ChatGPT（dot）から使う](docs/chatgpt-tunnel.md)                                                                                    | `setup` の詳細、プラグイン設定、手作業での Tunnel 構成       |
 | [CLI で使う](docs/cli.md)                                                                                                           | CLI のリファレンス、MCP クライアントからの利用、状態の読み方 |
 | [アーキテクチャと実装状況](docs/architecture.md)                                                                                    | 通信経路、認証、検証の範囲                                   |
-| [自動通知](docs/notifications-design.md)・[relay plugin](docs/relay-notifications.md)・[通知用 Tunnel](docs/notification-tunnel.md) | 実験的な自動通知                                             |
+| [自動通知](docs/notifications-design.md)・[relay plugin](docs/relay-notifications.md)・[通知用 Tunnel](docs/notification-tunnel.md) | 自動通知（Orca の experimental plugin を利用）               |
 | [開発](docs/development.md)                                                                                                         | ビルド、テスト、リリース                                     |
 
 ## ライセンス
