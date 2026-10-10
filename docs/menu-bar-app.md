@@ -4,7 +4,8 @@
 
 [GitHub Releases](https://github.com/andoshin11/orca-dots-bridge/releases/latest) の`Orca-Dots-Bridge-<版>-mac-arm64.zip`（Intel Mac は`-mac-x64.zip`）を展開し、`Orca Dots Bridge.app`を「アプリケーション」へ移して開きます。bridge はアプリに同梱されていて、Node.js も clone も不要です。
 
-- **初回の起動:** 開発者署名をしていないため、macOS が開くのを止めます。「システム設定」→「プライバシーとセキュリティ」で「このまま開く」を選んでください（1回だけです）。
+- **初回の起動:** 開発者署名をしていないため、macOS が「“Orca Dots Bridge”は開いていません」と表示します。「完了」を押し、「システム設定」→「プライバシーとセキュリティ」に出る「このまま開く」を押します。確認のダイアログでもう一度「このまま開く」を選ぶと、Mac のログインパスワードを求められます（1回だけです）。
+- **Finder で移してから開く:** ダウンロードしたアプリを Finder 以外の方法で移したり、ダウンロードフォルダのまま開いたりすると、macOS はアプリを一時的な場所で実行します（App Translocation）。その場合アプリは何も変更せず、「アプリケーション」へ移すよう案内して終了します（一時的な場所を Tunnel が参照すると、再起動後に動かなくなるためです）。
 - **bridge の置き場所:** アプリは起動時に、同梱の bridge を`~/.orca-dots-bridge/runtime/<版>/`へコピーし、自身の Electron を Node.js の代わりとして`~/.orca-dots-bridge/runtime/node`にリンクします。状態確認用 Tunnel（LaunchAgent）はここを使うため、アプリを終了していても動きます。アプリを移動・更新したら、一度起動すれば張り直します。
 - **更新:** 新しい版の zip で`Orca Dots Bridge.app`を置き換えて起動します。自動起動を入れていれば、状態確認用の profile も自動で新しい版に切り替わります。
 
