@@ -1,77 +1,14 @@
-import { randomBytes } from "node:crypto";
-import { mkdir, open, unlink } from "node:fs/promises";
-import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createMacKeychain, type KeyAccount } from "./events/keychain.js";
-import { KeySetupError, putOwned, setupErrorCode } from "./key-setup-shared.js";
+import { createMacKeychain } from "./events/keychain.js";
+import {
+  defaultRelayConfigPath,
+  KeySetupError,
+  setupErrorCode,
+  setupRelayKey,
+} from "./key-setup-shared.js";
 
-export const defaultRelayConfigPath = () =>
-  join(homedir(), ".config", "orca-agent-status-relay", "config.json");
-
-/**
- * Creates the relay signing key in the Keychain and writes the plugin config
- * that carries the same key, so the secret is never shown, typed or passed on
- * argv. Refuses to overwrite either an existing Keychain account or config file.
- */
-export async function setupRelayKey(options: {
-  keys: {
-    putNew(account: KeyAccount, key: Buffer): Promise<void>;
-    remove(account: KeyAccount): Promise<void>;
-  };
-  configPath: string;
-  relayPort: number;
-  random?: (size: number) => Buffer;
-}) {
-  if (!Number.isInteger(options.relayPort) || options.relayPort < 1024 || options.relayPort > 65535)
-    throw new Error("invalid_relay_port");
-  await mkdir(dirname(options.configPath), { recursive: true, mode: 0o700 });
-  // Claim the config path first so an existing plugin config is never replaced.
-  const file = await open(options.configPath, "wx", 0o600).catch((error: unknown) => {
-    throw new Error(
-      (error as NodeJS.ErrnoException).code === "EEXIST"
-        ? "relay_config_exists"
-        : "relay_config_unwritable",
-    );
-  });
-  const key = (options.random ?? randomBytes)(32);
-  let stored = false;
-  let uncertain = false;
-  try {
-    const result = await putOwned(options.keys, "relay-v1", key);
-    if (!result.ok) {
-      stored = result.written === "yes";
-      uncertain = result.written === "unknown";
-      throw result.error;
-    }
-    stored = true;
-    const config = {
-      url: `http://127.0.0.1:${options.relayPort}/relay`,
-      secret: `whsec_${key.toString("base64")}`,
-    };
-    await file.writeFile(`${JSON.stringify(config, null, 2)}\n`);
-    await file.close();
-  } catch (error) {
-    await file.close().catch(() => undefined);
-    await unlink(options.configPath).catch(() => undefined);
-    // Never leave a Keychain key that no plugin config carries. A key whose write
-    // state is unknown is not removed (it may predate this run); it is reported.
-    let leftover = uncertain;
-    if (stored) {
-      try {
-        await options.keys.remove("relay-v1");
-      } catch {
-        leftover = true;
-      }
-    }
-    throw new KeySetupError(
-      setupErrorCode(error, "relay_setup_failed"),
-      leftover ? ["relay-v1"] : [],
-    );
-  } finally {
-    key.fill(0);
-  }
-}
+export { defaultRelayConfigPath, setupRelayKey } from "./key-setup-shared.js";
 
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   const args = process.argv.slice(2);

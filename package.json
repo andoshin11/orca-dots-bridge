@@ -16,6 +16,7 @@
     "verify": "vp run verify-all",
     "start": "node dist/cli.mjs",
     "mcp": "node dist/mcp.mjs",
+    "setup": "node dist/setup.mjs",
     "verify:local": "node scripts/verify-local.mjs"
   },
   "dependencies": {
