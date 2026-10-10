@@ -4,7 +4,10 @@ export default defineConfig({
   fmt: { printWidth: 100 },
   run: {
     tasks: {
-      "verify-all": { command: ["vp check", "tsc --noEmit", "vp pack", "vp test"], cache: false },
+      "verify-all": {
+        command: ["vp check", "tsc --noEmit", "vp test"],
+        cache: false,
+      },
     },
   },
   pack: {
@@ -26,6 +29,8 @@ export default defineConfig({
     target: "node22",
     dts: false,
     sourcemap: true,
+    // Self-contained dist: release archives and the app ship without node_modules.
+    deps: { alwaysBundle: [/.*/] },
   },
   // Tests that spawn dist/*.mjs share one build made before any test runs.
   test: { include: ["test/**/*.test.ts"], testTimeout: 10000, globalSetup: ["test/build-once.ts"] },

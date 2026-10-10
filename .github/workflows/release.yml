@@ -1,0 +1,54 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching package.json "version") to publish:
+#   - orca-dots-bridge-<version>.tar.gz     self-contained CLI / MCP / setup (needs Node 22+)
+#   - Orca-Dots-Bridge-<version>-mac-<arch>.zip  menu bar app with the bridge inside (no Node needed)
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Check the tag matches package.json
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          test "$version" = "$(node -p 'require("./package.json").version')"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+      - run: npm ci --ignore-scripts
+      - run: npm run verify
+      - name: CLI archive
+        run: |
+          name="orca-dots-bridge-$VERSION"
+          mkdir -p "release/$name/dist"
+          cp dist/*.mjs dist/THIRD_PARTY_LICENSES.md "release/$name/dist/"
+          cp LICENSE THIRD_PARTY_NOTICES.md README.md "release/$name/"
+          tar -C release -czf "release/$name.tar.gz" "$name"
+      - name: Menu bar app
+        working-directory: app
+        run: |
+          npm ci
+          for arch in arm64 x64; do
+            RELEASE_VERSION="$VERSION" RELEASE_ARCH="$arch" npm run package -- --bundle
+            # The folder also carries Electron's LICENSE and LICENSES.chromium.html.
+            ditto -c -k --sequesterRsrc --keepParent "out/Orca Dots Bridge-darwin-$arch" \
+              "../release/Orca-Dots-Bridge-$VERSION-mac-$arch.zip"
+          done
+      - name: Checksums
+        working-directory: release
+        run: shasum -a 256 *.tar.gz *.zip > SHA256SUMS
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --generate-notes \
+            release/*.tar.gz release/*.zip release/SHA256SUMS

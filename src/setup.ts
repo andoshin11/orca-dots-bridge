@@ -139,6 +139,8 @@ export function statusMcpCommand(input: {
     "ORCA_BRIDGE_TOOLSET=status-send",
     "ORCA_BRIDGE_ENABLE_SEND=1",
     "ORCA_BRIDGE_CHATGPT_SETTINGS=1",
+    // Lets the menu bar app's Electron binary act as Node; real Node ignores it.
+    "ELECTRON_RUN_AS_NODE=1",
     plainPath(input.nodePath),
     plainPath(join(input.distDir, "mcp.mjs")),
   ].join(" ");
@@ -242,7 +244,9 @@ const readText = (path: string) => readFile(path, "utf8").catch(() => undefined)
 /** Whether a path runs a Node release the bridge supports (22 or later). */
 async function supportedNode(io: SetupIo, path: string) {
   if (!(await executable(path))) return false;
-  const result = await io.exec(path, ["--version"]).catch(() => undefined);
+  const result = await io
+    .exec(path, ["--version"], { ELECTRON_RUN_AS_NODE: "1" })
+    .catch(() => undefined);
   const major = Number(result?.stdout.trim().replace(/^v/, "").split(".")[0]);
   return result?.code === 0 && major >= 22;
 }

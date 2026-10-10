@@ -2,9 +2,11 @@
 
 ## 現在の公開対象
 
-Gitで追跡するソース・設定・lockfile・ドキュメントが対象です。`node_modules/`と`dist/`はgitignoreで除外しています。依存パッケージやツールチェーンのバイナリを含む配布物は、この確認の公開対象に含めません。プロジェクトのMITは第三者コードのライセンスを変更しません。
+Gitで追跡するソース・設定・lockfile・ドキュメントと、GitHub Releaseの配布物が対象です。`node_modules/`と`dist/`はgitignoreで除外しています。プロジェクトのMITは第三者コードのライセンスを変更しません。
 
-現行のVite+ pack出力のimportとsource mapを確認しました。MCP SDKとZodは外部importのままで、mapのsourcesはすべて`src/`のプロジェクトファイルでした。現在の生成物には依存実装の取り込みは確認されていません。バンドル設定を変えた場合は再確認してください。
+ビルドはruntime依存を`dist/*.mjs`へ同梱します（`vite.config.ts`の`deps.alwaysBundle`）。同梱したパッケージはsource mapの`sources`から特定し、`scripts/bundled-licenses.mjs`がLICENSE（とNOTICEがあればその本文）を`dist/THIRD_PARTY_LICENSES.md`へ書き出します。ライセンス文書が見つからないパッケージがあるとビルドを失敗させます。2026年10月時点の同梱対象は10件（MIT・ISC・BSD-3-Clause・Apache-2.0。Apache-2.0の2件にNOTICEファイルはありません）です。
+
+メニューバーアプリの配布物はElectronを含みます。`@electron/packager`が出力フォルダに置くElectronの`LICENSE`と`LICENSES.chromium.html`を、zipにそのまま含めています。
 
 ## MCP 2.0入口追加時の確認
 
