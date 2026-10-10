@@ -326,7 +326,21 @@ function registerIpc() {
   });
 }
 
+/**
+ * macOS runs a downloaded app that was not moved with Finder from a temporary,
+ * read-only copy (App Translocation). Linking the status Tunnel to that copy would
+ * break it after the next restart, so ask for a proper install instead.
+ */
+const translocated = () => process.execPath.includes("/AppTranslocation/");
+
 async function start() {
+  if (app.isPackaged && translocated()) {
+    dialog.showErrorBox(
+      "アプリを「アプリケーション」へ移してください",
+      "macOS がこのアプリを一時的な場所で実行しています。このままでは、状態確認用 Tunnel の自動起動が Mac の再起動後に動かなくなります。\n\nFinder で「Orca Dots Bridge」を「アプリケーション」フォルダへドラッグして移し、そこから開き直してください。",
+    );
+    return app.quit();
+  }
   const runtime = process.env.ORCA_DOTS_BRIDGE_DIR ? undefined : await bundledRuntime();
   const bridge = runtime?.bridge ?? (await bridgeDir());
   const setupModule = join(bridge, "dist", "setup.mjs");
