@@ -126,8 +126,8 @@ command -v orca
 人がブラウザーで行うのは次の3つだけです（どれも初回だけ）。
 
 1. [PlatformのTunnels](https://platform.openai.com/settings/organization/tunnels)で状態確認用のTunnelを作り、個人のChatGPT workspaceに関連付けて、IDを控えます。
-2. [PlatformのAPI keys](https://platform.openai.com/settings/organization/api-keys)でruntime用のキーを作ります（Restricted、Tunnelsの**Read**と**Use**だけ）。表示されたキーをコピーします。
-3. 下のコマンドの後、[ChatGPTのプラグイン画面](https://chatgpt.com/plugins)の「追加」から「カスタム MCP サーバーを追加」を開き、接続タイプ「トンネル」で1のTunnelを選び、認証は「認証なし」にします。
+2. [PlatformのAPI keys](https://platform.openai.com/settings/organization/api-keys)でruntime用のキーを作ります（Restricted、Tunnelsの**Read**と**Use**だけ。有効期限は付けてください。例: 90日）。表示されたキーをコピーします。
+3. 下のコマンドの後、[ChatGPTのプラグイン画面](https://chatgpt.com/plugins)の「追加」から「カスタム MCP サーバーを追加」を開き、接続タイプ「トンネル」で1のTunnelを選び、認証は「認証なし」にします（Tunnel接続はruntimeキーで守られるためです。サーバーURLで公開する構成には当てはめないでください）。
 
 ```sh
 pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id '<1のTunnel ID>' --install-tunnel-client --install-agent
@@ -135,10 +135,11 @@ pbcopy < /dev/null
 ```
 
 - キーはクリップボードから直接読み、`~/.orca-dots-bridge/tunnel/control-plane-api-key`（権限600）に保存します。2行目でクリップボードを空にします。
+- 期限が近づいたら新しいキーを作ってコピーし、`pbpaste | node dist/setup.mjs --runtime-key-stdin --replace-runtime-key`で入れ替えます（Tunnelは自動で再起動します）。メニューバーアプリでは「コピーした新しいキーに入れ替える」を使います。
 - tunnel-clientは版（v0.0.15）とアーカイブのSHA-256を固定して、`~/.orca-dots-bridge/tunnel-client/`に入れます。
 - `--install-agent`は、状態確認用のTunnelをLaunchAgent（`dev.orca-dots-bridge.status-tunnel`）として登録します。ログイン時に起動し、止まっても再起動します。tunnel-clientの出力は保存しません。
 - 通知用のTunnelも使う場合は`--notification-tunnel-id '<ID>'`を足すと、通知用のprofileも作ります（通知用Tunnelは試験のときだけ手で起動します）。
-- このTunnelが公開するツールは`orca_status`と`orca_send_instruction`（明示した1端末への追加指示）です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。
+- このTunnelが公開するツールは`orca_status`と`orca_send_instruction`（明示した1端末への追加指示）です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます（ChatGPTが付けるメタデータで見分けており、仕様書にない実測の挙動に頼っています。詳しくは下の「ChatGPTのプラグイン設定で送信を許可する」）。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。
 - `setup`でprofileが変わったあとは、ChatGPTでプラグインの管理画面を開き「ツールを更新」を1回押してください。
 - 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
 
@@ -405,7 +406,7 @@ ORCA_BRIDGE_STATUS_ONLY=1 node /absolute/path/to/orca-dots-bridge/dist/mcp.mjs
 セットアップは[公式Secure MCP Tunnelガイド](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels)と[公式クライアント配布](https://github.com/openai/tunnel-client/releases/latest)を参照してください。検証したクライアントはv0.0.15です。OS/CPUに合う配布物のチェックサムを確認して使用します。
 
 1. PlatformでTunnelを作成し、目的の個人ChatGPT workspaceへ関連付けます。名前なし候補を推測で選ばず、対象を確認します。
-2. runtime用APIキーを必要なProjectで作成します。検証には期限1日、RestrictedのTunnels Read＋Use、その他Noneを使用します。キーは利用者自身で管理し、チャット・Git・コマンド引数・`.env`へ入れません。これらの権限を特定の1件のTunnelだけに限定する設定とは扱いません。
+2. runtime用APIキーを必要なProjectで作成します。期限付き（検証なら1日、常用なら例えば90日）、RestrictedのTunnels Read＋Use、その他Noneを使用します。キーは利用者自身で管理し、チャット・Git・コマンド引数・`.env`へ入れません。これらの権限を特定の1件のTunnelだけに限定する設定とは扱いません。
 3. `tunnel-client init --sample sample_mcp_stdio_local` でローカルprofileを用意します。`--mcp-command` に上記status-only起動を設定し、NodeとOrcaは絶対パスにします。bridge子プロセスには必要なHOME/PATH/ORCA_BINとstatus-only設定だけを渡し、runtime APIキーを継承させない構成にします。例として `/usr/bin/env -i HOME=<home> PATH=<trusted-path> ORCA_BIN=<orca-path> ORCA_BRIDGE_STATUS_ONLY=1 <node-path> <bridge-path>/dist/mcp.mjs` を実際のパスへ置き換え、全体を1つのcommandとして設定します。
 4. profileのキー設定は値を埋め込まず `env:CONTROL_PLANE_API_KEY` とします。profileやヘルス確認ファイルはGit管理外へ保存し、health listenerは `127.0.0.1:0`、`health.url_file` はそのローカル専用パスにします。
 5. 利用者が通常のTerminalでキーを非表示入力し、最後の起動操作を行います。下の例はサブシェル終了で環境変数を破棄し、自動起動・永続保存をしません。ローカルの実行用profileを指定してください。

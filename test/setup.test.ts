@@ -12,9 +12,9 @@ import {
   type SetupOptions,
 } from "../src/setup.js";
 
-const statusTunnel = "tunnel_6ac38c1031e88191851d3923013d3cfa";
-const notificationTunnel = "tunnel_6ac4396a1d948191bc3ce734c9a9ea5a";
-const runtimeKey = `sk-proj-${"a".repeat(40)}`;
+const statusTunnel = "tunnel_00000000000000000000000000000001";
+const notificationTunnel = "tunnel_00000000000000000000000000000002";
+const runtimeKey = `sk-test-${"a".repeat(40)}`;
 
 async function executable(path: string) {
   await mkdir(join(path, ".."), { recursive: true });
@@ -172,13 +172,42 @@ describe("setup", () => {
     expect(await readFile(paths.statusProfile, "utf8")).toBe("hand-made\n");
   });
 
-  test("rejects malformed runtime keys and never replaces a stored one", async () => {
-    const { io } = await fakeIo();
+  test("rejects malformed runtime keys and replaces a stored one only when asked", async () => {
+    const { io, paths } = await fakeIo();
     let { steps } = await runSetup(io, { mode: "setup", runtimeKey: "not-a-key" });
     expect(byStep(steps)["runtime-key"]).toBe("error");
     await runSetup(io, { mode: "setup", runtimeKey });
-    ({ steps } = await runSetup(io, { mode: "setup", runtimeKey: `sk-${"b".repeat(40)}` }));
+    const rotated = `sk-${"b".repeat(40)}`;
+    ({ steps } = await runSetup(io, { mode: "setup", runtimeKey: rotated }));
     expect(byStep(steps)["runtime-key"]).toBe("error");
+    expect((await readFile(paths.runtimeKey, "utf8")).trim()).toBe(runtimeKey);
+
+    ({ steps } = await runSetup(io, {
+      mode: "doctor",
+      runtimeKey: rotated,
+      replaceRuntimeKey: true,
+    }));
+    expect(byStep(steps)["runtime-key"]).toBe("action");
+    ({ steps } = await runSetup(io, {
+      mode: "setup",
+      runtimeKey: rotated,
+      replaceRuntimeKey: true,
+    }));
+    expect(byStep(steps)["runtime-key"]).toBe("updated");
+    expect((await readFile(paths.runtimeKey, "utf8")).trim()).toBe(rotated);
+    expect((await stat(paths.runtimeKey)).mode & 0o777).toBe(0o600);
+  });
+
+  test("tightens a runtime key file whose permissions are too open", async () => {
+    const { io, paths } = await fakeIo();
+    await runSetup(io, { mode: "setup", runtimeKey });
+    await chmod(paths.runtimeKey, 0o644);
+    let { steps } = await runSetup(io, { mode: "doctor" });
+    expect(byStep(steps)["runtime-key"]).toBe("action");
+    expect((await stat(paths.runtimeKey)).mode & 0o777).toBe(0o644);
+    ({ steps } = await runSetup(io, { mode: "setup" }));
+    expect(byStep(steps)["runtime-key"]).toBe("ok");
+    expect((await stat(paths.runtimeKey)).mode & 0o777).toBe(0o600);
   });
 
   test("does not extract a tunnel-client archive whose digest is not the pinned one", async () => {
@@ -350,6 +379,12 @@ describe("setup helpers", () => {
     expect(parseSetupArgs(["doctor"]).mode).toBe("doctor");
     expect(() => parseSetupArgs(["doctor", "--install-agent"])).toThrow("doctor_is_read_only");
     expect(() => parseSetupArgs(["--force"])).toThrow("unknown_argument");
+    expect(parseSetupArgs(["--runtime-key-stdin", "--replace-runtime-key"]).replaceRuntimeKey).toBe(
+      true,
+    );
+    expect(() => parseSetupArgs(["doctor", "--replace-runtime-key"])).toThrow(
+      "doctor_is_read_only",
+    );
     expect(() => parseSetupArgs(["--status-tunnel-id"])).toThrow("missing_value");
   });
 });

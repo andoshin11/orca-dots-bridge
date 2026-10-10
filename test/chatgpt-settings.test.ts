@@ -15,30 +15,49 @@ import {
 const tempHome = () => mkdtemp(join(tmpdir(), "chatgpt-settings-"));
 
 /** Sends JSON-RPC lines to the built MCP server and collects responses by id. */
+/**
+ * Sends JSON-RPC lines to the built MCP server and collects responses by id.
+ * Like a real client, it waits for the initialize result before sending the rest.
+ */
 async function rpc(env: Record<string, string>, requests: object[]) {
   const child = spawn(process.execPath, ["dist/mcp.mjs"], {
     env: { PATH: process.env.PATH ?? "", ...env },
-    stdio: ["pipe", "pipe", "ignore"],
+    stdio: ["pipe", "pipe", "pipe"],
   });
+  let stderr = "";
+  child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString()));
   const responses = new Map<number, any>();
+  const waiters: { ids: number[]; resolve: () => void }[] = [];
   let buffer = "";
-  const ids = requests.flatMap((r) => ("id" in r ? [r.id as number] : []));
-  const done = new Promise<void>((resolve) => {
-    child.stdout.on("data", (chunk: Buffer) => {
-      buffer += chunk.toString();
-      let newline: number;
-      while ((newline = buffer.indexOf("\n")) >= 0) {
-        const message = JSON.parse(buffer.slice(0, newline));
-        buffer = buffer.slice(newline + 1);
-        responses.set(message.id, message);
-        if (ids.every((id) => responses.has(id))) resolve();
-      }
-    });
+  child.stdout.on("data", (chunk: Buffer) => {
+    buffer += chunk.toString();
+    let newline: number;
+    while ((newline = buffer.indexOf("\n")) >= 0) {
+      const message = JSON.parse(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      responses.set(message.id, message);
+      for (const w of waiters) if (w.ids.every((id) => responses.has(id))) w.resolve();
+    }
   });
-  for (const request of requests) child.stdin.write(`${JSON.stringify(request)}\n`);
-  await done;
-  child.kill();
-  return responses;
+  const waitFor = (ids: number[]) =>
+    new Promise<void>((resolve, reject) => {
+      if (ids.every((id) => responses.has(id))) return resolve();
+      const timer = setTimeout(
+        () => reject(new Error(`no response for ${ids.join(",")}; stderr: ${stderr}`)),
+        8000,
+      );
+      waiters.push({ ids, resolve: () => (clearTimeout(timer), resolve()) });
+    });
+  try {
+    const [first, ...rest] = requests;
+    child.stdin.write(`${JSON.stringify(first)}\n`);
+    if (first && "id" in first) await waitFor([first.id as number]);
+    for (const request of rest) child.stdin.write(`${JSON.stringify(request)}\n`);
+    await waitFor(rest.flatMap((r) => ("id" in r ? [r.id as number] : [])));
+    return responses;
+  } finally {
+    child.kill();
+  }
 }
 
 const initialize = {

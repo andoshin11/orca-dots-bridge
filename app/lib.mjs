@@ -59,6 +59,8 @@ export function parseSetupRequest(input) {
   if (typeof input !== "object" || input === null) throw new Error("invalid_request");
   const request = {
     useClipboardKey: input.useClipboardKey === true,
+    // Rotating needs the clipboard key; a stored key is never replaced otherwise.
+    replaceRuntimeKey: input.useClipboardKey === true && input.replaceRuntimeKey === true,
     installTunnelClient: input.installTunnelClient === true,
     installAgent: input.installAgent === true,
   };

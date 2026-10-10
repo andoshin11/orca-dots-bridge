@@ -1,11 +1,8 @@
 import { execFileSync } from "node:child_process";
 import { resolve } from "node:path";
-import { beforeAll, expect, test } from "vite-plus/test";
+import { expect, test } from "vite-plus/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-beforeAll(() => {
-  execFileSync(resolve("node_modules/.bin/vp"), ["pack"], { stdio: "pipe" });
-});
 test("built CLI emits machine-readable result and fails unknown commands", () => {
   const env = { ...process.env, ORCA_BIN: resolve("test/fixtures/orca.mjs"), ORCA_ENVIRONMENT: "" };
   const result = JSON.parse(
