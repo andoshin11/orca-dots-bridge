@@ -119,6 +119,29 @@ command -v orca
 
 **クラウドのdot**はこのローカル設定を自動で引き継ぎません。接続済みコンピューターのローカルタスク経由なら[dotからの呼び出し](docs/local-validation.md#dotからの呼び出し)、直接MCP接続なら下の「Secure MCP Tunnelでstatusだけを公開する」を参照してください。後者にはTunnel・個人workspace・プラグインの設定が別途必要です。
 
+### 6. dotから直接statusを呼べるようにする（setupコマンド）
+
+`setup`コマンドが、鍵・relay pluginの設定・tunnel-clientの導入・Tunnelのprofile・ログイン時の自動起動をまとめて準備します。何度実行しても同じ結果になり、自分で作っていないファイルや鍵は上書きしません。鍵は画面にもコマンド引数にも出しません。
+
+人がブラウザーで行うのは次の3つだけです（どれも初回だけ）。
+
+1. [PlatformのTunnels](https://platform.openai.com/settings/organization/tunnels)で状態確認用のTunnelを作り、個人のChatGPT workspaceに関連付けて、IDを控えます。
+2. [PlatformのAPI keys](https://platform.openai.com/settings/organization/api-keys)でruntime用のキーを作ります（Restricted、Tunnelsの**Read**と**Use**だけ）。表示されたキーをコピーします。
+3. 下のコマンドの後、[ChatGPTのプラグイン設定](https://chatgpt.com/#settings/Connectors)で「カスタム MCP サーバー」を作り、接続タイプ「トンネル」で1のTunnelを選び、認証は「認証なし」にします。
+
+```sh
+pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id '<1のTunnel ID>' --install-tunnel-client --install-agent
+pbcopy < /dev/null
+```
+
+- キーはクリップボードから直接読み、`~/.orca-dots-bridge/tunnel/control-plane-api-key`（権限600）に保存します。2行目でクリップボードを空にします。
+- tunnel-clientは版（v0.0.15）とアーカイブのSHA-256を固定して、`~/.orca-dots-bridge/tunnel-client/`に入れます。
+- `--install-agent`は、status-only（`ORCA_BRIDGE_STATUS_ONLY=1`）のTunnelをLaunchAgent（`dev.orca-dots-bridge.status-tunnel`）として登録します。ログイン時に起動し、止まっても再起動します。tunnel-clientの出力は保存しません。
+- 通知用のTunnelも使う場合は`--notification-tunnel-id '<ID>'`を足すと、通知用のprofileも作ります（通知用Tunnelは試験のときだけ手で起動します）。
+- 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
+
+自動起動を止めるときは`launchctl bootout gui/$(id -u)/dev.orca-dots-bridge.status-tunnel`を実行し、`~/Library/LaunchAgents/dev.orca-dots-bridge.status-tunnel.plist`を消します。profileはこのcheckoutの`dist/mcp.mjs`を指すので、checkoutを移動・削除した場合は`setup`を再実行してください。
+
 ### 停止・再開と、よくあるつまずき
 
 - CLIの状態確認は毎回終了します。再開はbridgeフォルダで同じコマンドを実行するだけです。新しいターミナルでは手順1・3の環境変数も設定し直します。
