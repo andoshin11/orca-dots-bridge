@@ -1,6 +1,6 @@
 # 通知用 Tunnel の設定
 
-自動通知（二段階試験）で、dot から bridge の購読入口 `http://127.0.0.1:8787/mcp` に届く経路を Secure MCP Tunnel で作る手順です。状態確認用の Tunnel（README の「Secure MCP Tunnel で status だけを公開する」）とは別の Tunnel にします。
+自動通知（二段階試験）で、dot から bridge の購読入口 `http://127.0.0.1:8787/mcp` に届く経路を Secure MCP Tunnel で作る手順です。状態確認用の Tunnel（[ChatGPT（dot）から使う](chatgpt-tunnel.md)の「Secure MCP Tunnel で status だけを公開する」）とは別の Tunnel にします。
 
 ## Tunnel は必要か
 
@@ -28,7 +28,7 @@ dot のプラグイン側に API キーを登録し、Tunnel にそのまま転�
 
 ## 手順
 
-手順 2 と 3（Bearer ファイルと profile）は、bridge の `setup` コマンドがまとめて行えます（README の「6. dotから直接statusを呼べるようにする」）。`--notification-tunnel-id '<通知用 Tunnel の ID>'` を付けて実行すると、`~/.orca-dots-bridge/tunnel/service-authorization` と `~/.orca-dots-bridge/tunnel/profiles/orca-notifications.yaml` を作ります。dot 用の API キーは表示せず、Keychain の `service-v1` から直接 Bearer ファイルに書くので、手順 2 の手入力は不要です。以下は手作業で行う場合の手順です。
+手順 2 と 3（Bearer ファイルと profile）は、bridge の `setup` コマンドがまとめて行えます（[ChatGPT（dot）から使う](chatgpt-tunnel.md)の「setup コマンド」）。`--notification-tunnel-id '<通知用 Tunnel の ID>'` を付けて実行すると、`~/.orca-dots-bridge/tunnel/service-authorization` と `~/.orca-dots-bridge/tunnel/profiles/orca-notifications.yaml` を作ります。dot 用の API キーは表示せず、Keychain の `service-v1` から直接 Bearer ファイルに書くので、手順 2 の手入力は不要です。以下は手作業で行う場合の手順です。
 
 ### 1. 通知用の Tunnel を作る（初回だけ）
 
@@ -120,6 +120,6 @@ bridge の診断（`counts.json`）で次を確かめます。
 
 ## 検証の状況
 
-- 状態確認用の Tunnel（stdio、v0.0.15）で、dot から `orca_status` を直接呼べることは検証済みです（README）。
+- 状態確認用の Tunnel（stdio、v0.0.15）で、dot から `orca_status` を直接呼べることは検証済みです（[アーキテクチャと実装状況](architecture.md)）。
 - 2026-10-08 の試験では、Tunnel 経由で購読入口に届き、購読の作成と通知の送信まで成功しています。ただし、そのとき Bearer をどちらの方法で付けたかは記録に残っていません。
 - **この手順の `mcp.extra_headers` による構成は、tunnel-client v0.0.15 の資料とソースで確かめたもので、まだ実際には動かしていません。** `Authorization` は MCP 転送先へのヘッダーとして予約されておらず、そのまま設定されることをソースで確認しています。

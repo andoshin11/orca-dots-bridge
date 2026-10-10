@@ -41,4 +41,4 @@ Orcaには`terminal.agentEvents.describe`と対象限定購読の専用RPCが必
 
 2026-10-08の隔離実試験では、確認通信1回と購読作成1回が成功しました。追加承認後、イベント送信1回が成功し、製品側webhook起動を確認しました。追加の購読要求1回は拒否され、終了時の別送信試行1回はキャンセルされました。イベント種別は固定診断から確定できないため、ターン終了・入力待ちの両方を実証したとは扱いません。dot画面・音声の最終応答、長期運用、Mac mini移行も未検証です。
 
-試験は期限で終了し、プロセス・listener・ロックの解放と製品側タスクの停止を確認しました。個人用launcher、runtime profile、認証情報、実callback URL、診断原本は公開物に含めていません。移行の準備と切戻しは[Mac miniへの移行手順](mac-mini-migration.md)を参照してください。
+試験は期限で終了し、プロセス・listener・ロックの解放と製品側タスクの停止を確認しました。個人用launcher、runtime profile、認証情報、実callback URL、診断原本は公開物に含めていません。移行の準備と切戻しは[Mac miniへの移行手順](archive/mac-mini-migration.md)を参照してください。
