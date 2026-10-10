@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
   chatgptSettingsPath,
+  fromSettingsPage,
   readSettings,
   settingsReadResult,
   settingsTools,
@@ -52,6 +53,16 @@ const initialize = {
 };
 const initialized = { jsonrpc: "2.0", method: "notifications/initialized" };
 const list = { jsonrpc: "2.0", id: 2, method: "tools/list" };
+const update = (id: number, sendEnabled: boolean, meta?: Record<string, unknown>) => ({
+  jsonrpc: "2.0",
+  id,
+  method: "tools/call",
+  params: {
+    name: settingsTools.update,
+    arguments: { set: { sendEnabled } },
+    ...(meta ? { _meta: meta } : {}),
+  },
+});
 
 describe("ChatGPT plugin settings", () => {
   test("missing or malformed settings read as defaults", async () => {
@@ -86,12 +97,7 @@ describe("ChatGPT plugin settings", () => {
       initialize,
       initialized,
       list,
-      {
-        jsonrpc: "2.0",
-        id: 3,
-        method: "tools/call",
-        params: { name: settingsTools.update, arguments: { set: { sendEnabled: true } } },
-      },
+      update(3, true, { "openai/action_name": settingsTools.update }),
     ]);
     const capability = { readTool: settingsTools.read, updateTool: settingsTools.update };
     expect(on.get(1).result.capabilities.extensions["openai/settings"]).toEqual(capability);
@@ -101,10 +107,34 @@ describe("ChatGPT plugin settings", () => {
       settingsTools.read,
       settingsTools.update,
     ]);
-    for (const tool of on.get(2).result.tools.slice(1))
-      expect(tool._meta).toEqual({ ui: { visibility: ["app"] } });
     expect(on.get(3).result.structuredContent).toEqual({ values: { sendEnabled: true } });
     expect(await readSettings(chatgptSettingsPath(home))).toEqual({ sendEnabled: true });
+  });
+
+  test("only the settings page can turn sending on; anything can turn it off", async () => {
+    expect(fromSettingsPage({ "openai/action_name": "x" })).toBe(true);
+    expect(fromSettingsPage({ "openai/action_name": "x", "openai/session": "s" })).toBe(false);
+    expect(fromSettingsPage({ "openai/session": "s" })).toBe(false);
+    expect(fromSettingsPage(undefined)).toBe(false);
+
+    const home = await tempHome();
+    const env = { HOME: home, ORCA_BRIDGE_STATUS_ONLY: "1", ORCA_BRIDGE_CHATGPT_SETTINGS: "1" };
+    const fromChat = { "openai/session": "s", "openai/locale": "ja-JP" };
+    const chat = await rpc(env, [
+      initialize,
+      initialized,
+      update(3, true, fromChat),
+      update(4, true),
+    ]);
+    for (const id of [3, 4]) {
+      expect(chat.get(id).result.isError).toBe(true);
+      expect(chat.get(id).result.content[0].text).toContain("settings page");
+    }
+    expect(await readSettings(chatgptSettingsPath(home))).toEqual({ sendEnabled: false });
+
+    await updateSettings(chatgptSettingsPath(home), { sendEnabled: true });
+    const off = await rpc(env, [initialize, initialized, update(3, false, fromChat)]);
+    expect(off.get(3).result.structuredContent).toEqual({ values: { sendEnabled: false } });
   });
 
   test("send is exposed but refused until the ChatGPT setting allows it", async () => {

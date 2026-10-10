@@ -138,7 +138,7 @@ pbcopy < /dev/null
 - tunnel-clientは版（v0.0.15）とアーカイブのSHA-256を固定して、`~/.orca-dots-bridge/tunnel-client/`に入れます。
 - `--install-agent`は、状態確認用のTunnelをLaunchAgent（`dev.orca-dots-bridge.status-tunnel`）として登録します。ログイン時に起動し、止まっても再起動します。tunnel-clientの出力は保存しません。
 - 通知用のTunnelも使う場合は`--notification-tunnel-id '<ID>'`を足すと、通知用のprofileも作ります（通知用Tunnelは試験のときだけ手で起動します）。
-- このTunnelが公開するツールは`orca_status`と`orca_send_instruction`（明示した1端末への追加指示）です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。
+- このTunnelが公開するツールは`orca_status`と`orca_send_instruction`（明示した1端末への追加指示）です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。
 - `setup`でprofileが変わったあとは、ChatGPTでプラグインの管理画面を開き「ツールを更新」を1回押してください。
 - 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
 

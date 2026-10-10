@@ -89,8 +89,20 @@ export async function assertSendAllowed(path: string) {
     );
 }
 
-// Settings tools are for ChatGPT's settings page, not for the model in chat.
-const settingsPageOnly = { ui: { visibility: ["app"] } };
+/**
+ * ChatGPT's settings page calls carry `openai/action_name` and no `openai/session`;
+ * calls the model makes in chat carry `openai/session`. The model controls only
+ * arguments, not this metadata. This is observed behavior, not documented, so any
+ * change makes enabling fail (closed) rather than open. `_meta.ui.visibility: ["app"]`
+ * cannot be used instead: it hides the tools from the settings page as well.
+ */
+export function fromSettingsPage(meta: Record<string, unknown> | undefined) {
+  return (
+    meta !== undefined &&
+    typeof meta["openai/action_name"] === "string" &&
+    !("openai/session" in meta)
+  );
+}
 
 export function registerChatgptSettings(server: McpServer, path = chatgptSettingsPath()) {
   const structured = (value: Record<string, unknown>) => ({
@@ -109,7 +121,6 @@ export function registerChatgptSettings(server: McpServer, path = chatgptSetting
         layout: z.array(z.record(z.string(), z.unknown())).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-      _meta: settingsPageOnly,
     },
     async () => structured(settingsReadResult(await readSettings(path))),
   );
@@ -127,8 +138,14 @@ export function registerChatgptSettings(server: McpServer, path = chatgptSetting
         idempotentHint: true,
         openWorldHint: false,
       },
-      _meta: settingsPageOnly,
     },
-    async ({ set }) => structured({ values: await updateSettings(path, set) }),
+    async ({ set }, extra) => {
+      if (set.sendEnabled === true && !fromSettingsPage(extra._meta))
+        throw new BridgeError(
+          "settings_page_only",
+          "Turning on sending is only accepted from this plugin's settings page in ChatGPT. Ask the user to turn it on there.",
+        );
+      return structured({ values: await updateSettings(path, set) });
+    },
   );
 }
