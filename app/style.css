@@ -1,0 +1,155 @@
+:root {
+  --bg: #ffffff;
+  --fg: #1d1d1f;
+  --muted: #6e6e73;
+  --line: #d2d2d7;
+  --panel: #f5f5f7;
+  --ok: #1a7f37;
+  --action: #9a6700;
+  --error: #cf222e;
+  --accent: #0a66d6;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1e1e1e;
+    --fg: #f5f5f7;
+    --muted: #a1a1a6;
+    --line: #3a3a3c;
+    --panel: #2a2a2c;
+    --ok: #3fb950;
+    --action: #d29922;
+    --error: #f85149;
+    --accent: #4c9aff;
+  }
+}
+body {
+  margin: 0;
+  padding: 20px 24px 32px;
+  background: var(--bg);
+  color: var(--fg);
+  font:
+    13px/1.6 -apple-system,
+    BlinkMacSystemFont,
+    "Hiragino Sans",
+    sans-serif;
+}
+h1 {
+  font-size: 20px;
+  margin: 0;
+}
+h2 {
+  font-size: 15px;
+  margin: 0;
+}
+h3 {
+  font-size: 13px;
+  margin: 0 0 4px;
+}
+section {
+  margin-top: 20px;
+  padding: 14px 16px;
+  background: var(--panel);
+  border-radius: 10px;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 6px 0;
+}
+.row h2 {
+  flex: 1;
+}
+.muted {
+  color: var(--muted);
+}
+.small {
+  font-size: 12px;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+}
+td {
+  padding: 4px 6px;
+  border-top: 1px solid var(--line);
+  vertical-align: top;
+}
+td.detail {
+  color: var(--muted);
+  word-break: break-all;
+  font-size: 12px;
+}
+.chip {
+  white-space: nowrap;
+  font-weight: 600;
+}
+.chip.ok,
+.chip.created,
+.chip.updated {
+  color: var(--ok);
+}
+.chip.action {
+  color: var(--action);
+}
+.chip.error {
+  color: var(--error);
+}
+.chip.skipped {
+  color: var(--muted);
+}
+ol.setup {
+  padding-left: 20px;
+  margin: 8px 0 0;
+}
+ol.setup li {
+  margin-bottom: 14px;
+}
+ol.setup p {
+  margin: 0 0 4px;
+}
+label {
+  display: block;
+}
+.row label {
+  display: inline;
+}
+input:not([type]) {
+  flex: 1;
+  min-width: 260px;
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: ui-monospace, Menlo, monospace;
+}
+button {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--fg);
+  cursor: pointer;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+code {
+  font-family: ui-monospace, Menlo, monospace;
+  padding: 2px 6px;
+  background: var(--bg);
+  border-radius: 4px;
+}
+details {
+  margin-top: 4px;
+}
