@@ -12,7 +12,15 @@ import {
   serialize,
 } from "./service.js";
 import { errorResult } from "./errors.js";
-const server = new McpServer({ name: "orca-dots-bridge", version: "0.1.0" });
+import { registerChatgptSettings, settingsCapability } from "./chatgpt-settings.js";
+// Opt-in trial of OpenAI MCP Extensions structured settings on the ChatGPT plugin page.
+const chatgptSettings = process.env.ORCA_BRIDGE_CHATGPT_SETTINGS === "1";
+const server = new McpServer(
+  { name: "orca-dots-bridge", version: "0.1.0" },
+  chatgptSettings
+    ? { capabilities: { experimental: settingsCapability, extensions: settingsCapability } }
+    : undefined,
+);
 const bridge = new Bridge();
 const statusOnly = process.env.ORCA_BRIDGE_STATUS_ONLY === "1";
 const toolset = process.env.ORCA_BRIDGE_TOOLSET ?? "full";
@@ -119,4 +127,5 @@ if (sendEnabled) {
     wrap((i) => bridge.send(exposedSendSchema.parse(i))),
   );
 }
+if (chatgptSettings) registerChatgptSettings(server);
 await server.connect(new StdioServerTransport());
