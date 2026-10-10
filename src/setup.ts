@@ -44,7 +44,7 @@ const runtimeKeyPattern = /^sk-[A-Za-z0-9_-]{20,256}$/;
 export const setupUrls = {
   tunnels: "https://platform.openai.com/settings/organization/tunnels",
   apiKeys: "https://platform.openai.com/settings/organization/api-keys",
-  connectors: "https://chatgpt.com/#settings/Connectors",
+  connectors: "https://chatgpt.com/plugins",
 };
 
 export function setupPaths(home: string) {
