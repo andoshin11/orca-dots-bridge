@@ -1,5 +1,15 @@
 import { execFile } from "node:child_process";
-import { access, constants, readFile } from "node:fs/promises";
+import {
+  access,
+  constants,
+  cp,
+  readFile,
+  readlink,
+  rename,
+  rm,
+  symlink,
+  unlink,
+} from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -35,6 +45,39 @@ const run = promisify(execFile);
 const appDir = dirname(fileURLToPath(import.meta.url));
 const home = homedir();
 
+const exists = (path) =>
+  access(path).then(
+    () => true,
+    () => false,
+  );
+
+/**
+ * A release app carries the built bridge in its Resources. The status Tunnel keeps
+ * running from launchd after the app quits and the profile cannot hold paths with
+ * spaces, so the bridge is copied to ~/.orca-dots-bridge/runtime/<version> and this
+ * app's Electron binary is linked there to serve as Node (ELECTRON_RUN_AS_NODE).
+ */
+async function bundledRuntime() {
+  const bundled = join(process.resourcesPath ?? "", "bridge");
+  if (!app.isPackaged || !(await exists(join(bundled, "dist", "setup.mjs")))) return undefined;
+  const root = join(home, ".orca-dots-bridge", "runtime");
+  const target = join(root, app.getVersion());
+  if (!(await exists(join(target, "dist", "setup.mjs")))) {
+    const temp = `${target}.${process.pid}.tmp`;
+    await rm(temp, { recursive: true, force: true });
+    await cp(bundled, temp, { recursive: true });
+    await rm(target, { recursive: true, force: true });
+    await rename(temp, target);
+  }
+  // Re-point the link when the app has moved (e.g. into /Applications).
+  const node = join(root, "node");
+  if ((await readlink(node).catch(() => undefined)) !== process.execPath) {
+    await unlink(node).catch(() => undefined);
+    await symlink(process.execPath, node);
+  }
+  return { bridge: target, nodePath: node };
+}
+
 async function bridgeDir() {
   if (process.env.ORCA_DOTS_BRIDGE_DIR) return process.env.ORCA_DOTS_BRIDGE_DIR;
   // A packaged app records the checkout it was built from (see scripts/package.mjs).
@@ -65,6 +108,7 @@ async function resolveNode() {
 
 let setup;
 let io;
+let usesBundledRuntime = false;
 let tray;
 let window;
 let busy = false;
@@ -137,7 +181,8 @@ async function runSetup(input) {
     const options = {
       mode: "setup",
       ...request,
-      ...(process.env.ORCA_DOTS_NODE ? { nodePath: io.nodePath } : {}),
+      // A bundled runtime or an explicit ORCA_DOTS_NODE replaces a Node recorded in the profile.
+      ...(process.env.ORCA_DOTS_NODE || usesBundledRuntime ? { nodePath: io.nodePath } : {}),
     };
     if (request.useClipboardKey) {
       const key = runtimeKeyFromClipboard(clipboard.readText());
@@ -282,7 +327,8 @@ function registerIpc() {
 }
 
 async function start() {
-  const bridge = await bridgeDir();
+  const runtime = process.env.ORCA_DOTS_BRIDGE_DIR ? undefined : await bundledRuntime();
+  const bridge = runtime?.bridge ?? (await bridgeDir());
   const setupModule = join(bridge, "dist", "setup.mjs");
   if (
     !(await access(setupModule).then(
@@ -296,7 +342,7 @@ async function start() {
     );
     return app.quit();
   }
-  const nodePath = await resolveNode();
+  const nodePath = runtime?.nodePath ?? (await resolveNode());
   if (!nodePath) {
     dialog.showErrorBox(
       "Node.js が見つかりません",
@@ -318,10 +364,17 @@ async function start() {
     PATH: `${process.env.PATH ?? ""}:/opt/homebrew/bin:/usr/local/bin`,
   };
   io = setup.systemSetupIo({ distDir: join(bridge, "dist"), nodePath, env });
+  usesBundledRuntime = Boolean(runtime);
 
   tray = new Tray(nativeImage.createEmpty());
   tray.setTitle("Orca …");
   await exclusive(doctor).catch(() => undefined);
+  // After an app update the status profile still points at the previous runtime.
+  // Rewriting it needs no new input, so do what "セットアップを実行" would do.
+  const profile = state.steps.find((s) => s.step === "status-profile");
+  const agentLoaded = state.steps.some((s) => s.step === "launch-agent" && s.status === "ok");
+  if (usesBundledRuntime && profile?.detail === "outdated" && agentLoaded)
+    await runSetup({ installAgent: true }).catch(() => undefined);
   registerIpc();
   notify();
   if (overallLevel(state.steps) !== "ok") openWindow();
