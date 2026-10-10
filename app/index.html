@@ -30,9 +30,26 @@
         <li>
           <h3>状態確認用の Tunnel を作る（初回だけ）</h3>
           <p>
-            Platform の Tunnels で Tunnel を作り、個人の ChatGPT workspace に関連付けます。作った
-            Tunnel の ID を貼り付けてください。
+            Platform の Tunnels で <b>Create tunnel</b> を押し、Name と Description
+            を入れて、ChatGPT workspaces で個人の workspace を選んで作成します。一覧のコピーボタンで
+            Tunnel の ID をコピーし、下に貼り付けてください。
           </p>
+          <div class="shots">
+            <figure>
+              <img
+                src="images/tunnel-create.png"
+                alt="Create tunnel のダイアログ。Name、Description、ChatGPT workspaces を入れる"
+              />
+              <figcaption>Name・Description を入れ、ChatGPT workspaces を選ぶ</figcaption>
+            </figure>
+            <figure>
+              <img
+                src="images/tunnel-list.png"
+                alt="Tunnels の一覧。右上に Create tunnel、ID の横にコピーボタン"
+              />
+              <figcaption>作成後、ID の横のボタンでコピー</figcaption>
+            </figure>
+          </div>
           <div class="row">
             <button type="button" data-open="tunnels">Tunnels を開く</button>
             <input id="statusTunnelId" placeholder="tunnel_..." spellcheck="false" />
@@ -45,9 +62,28 @@
         <li>
           <h3>runtime キーを作る（初回だけ）</h3>
           <p>
-            Platform の API keys で、権限を Restricted・Tunnels の <b>Read</b> と <b>Use</b>
-            だけにしたキーを作り、<b>コピー</b>してください。キーはこの画面には表示されず、クリップボードから直接保存したあとクリップボードを空にします。
+            Platform の API keys で <b>Create new secret key</b> を押し、Project
+            と有効期限（期限なし）を選び、Permissions を <b>Restricted</b> にして Tunnels の
+            <b>Read</b> と
+            <b>Use</b>
+            だけを付けて作成します。表示されたキーを<b>コピー</b>してください。キーはこの画面には表示されず、クリップボードから直接保存したあとクリップボードを空にします。
           </p>
+          <div class="shots">
+            <figure>
+              <img
+                src="images/key-create.png"
+                alt="Create new secret key のダイアログ上部。Project、有効期限、Restricted"
+              />
+              <figcaption>Project・有効期限を選び、Restricted にする</figcaption>
+            </figure>
+            <figure>
+              <img
+                src="images/key-permissions.png"
+                alt="Permissions の Tunnels で Read と Use を選んだところ"
+              />
+              <figcaption>下のほうの Tunnels で Read と Use を選ぶ</figcaption>
+            </figure>
+          </div>
           <div class="row">
             <button type="button" data-open="apiKeys">API keys を開く</button>
             <label><input id="useClipboardKey" type="checkbox" /> コピーしたキーを使う</label>
@@ -71,13 +107,31 @@
         <li>
           <h3>ChatGPT にプラグインを作る（初回だけ）</h3>
           <p>
-            ChatGPT のプラグイン設定で「カスタム MCP サーバー」を作り、接続タイプ「トンネル」で次の
-            Tunnel を選び、認証は「認証なし」にします。
+            ChatGPT のプラグイン画面で右上の<b>追加</b>から「カスタム MCP
+            サーバーを追加」を開きます。名前を入れ、接続タイプを<b>トンネル</b>にして次の Tunnel
+            を選び（一覧に出る名前を押すか ID
+            を貼り付け）、認証を<b>認証なし</b>にします。確認のチェックを入れて「プラグインとして作成」を押してください。
           </p>
+          <div class="shots">
+            <figure>
+              <img
+                src="images/plugin-add.png"
+                alt="プラグイン画面の追加メニュー。カスタム MCP サーバーを追加"
+              />
+              <figcaption>追加 →「カスタム MCP サーバーを追加」</figcaption>
+            </figure>
+            <figure>
+              <img
+                src="images/plugin-tunnel.png"
+                alt="カスタム MCP サーバーを追加のダイアログ。トンネル、Tunnel の選択、認証なし、確認のチェック"
+              />
+              <figcaption>トンネル・Tunnel・認証なしを選び、チェックを入れる</figcaption>
+            </figure>
+          </div>
           <div class="row">
             <code id="pluginTunnel">—</code>
             <button id="copyTunnel" type="button">ID をコピー</button>
-            <button type="button" data-open="connectors">プラグイン設定を開く</button>
+            <button type="button" data-open="connectors">プラグイン画面を開く</button>
           </div>
         </li>
       </ol>
