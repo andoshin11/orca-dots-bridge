@@ -149,7 +149,7 @@ async function runSetup(input) {
     if (
       runtimeKeyFromClipboard(clipboard.readText()) === options.runtimeKey &&
       options.runtimeKey &&
-      steps.some((s) => s.step === "runtime-key" && ["ok", "created"].includes(s.status))
+      steps.some((s) => s.step === "runtime-key" && ["ok", "created", "updated"].includes(s.status))
     )
       clipboard.clear();
     await doctor();

@@ -60,13 +60,13 @@
           </details>
         </li>
         <li>
-          <h3>runtime キーを作る（初回だけ）</h3>
+          <h3>runtime キーを作る（初回と、期限が来る前）</h3>
           <p>
             Platform の API keys で <b>Create new secret key</b> を押し、Project
-            と有効期限（期限なし）を選び、Permissions を <b>Restricted</b> にして Tunnels の
-            <b>Read</b> と
+            と有効期限（期限付き。例: 90 日）を選び、Permissions を <b>Restricted</b> にして Tunnels
+            の <b>Read</b> と
             <b>Use</b>
-            だけを付けて作成します。表示されたキーを<b>コピー</b>してください。キーはこの画面には表示されず、クリップボードから直接保存したあとクリップボードを空にします。
+            だけを付けて作成します。表示されたキーを<b>コピー</b>してください。キーはこの画面には表示されず、クリップボードから直接保存したあとクリップボードを空にします。期限が近づいたら新しいキーを作ってコピーし、「コピーした新しいキーに入れ替える」で入れ替えてください。
           </p>
           <div class="shots">
             <figure>
@@ -74,7 +74,7 @@
                 src="images/key-create.png"
                 alt="Create new secret key のダイアログ上部。Project、有効期限、Restricted"
               />
-              <figcaption>Project・有効期限を選び、Restricted にする</figcaption>
+              <figcaption>Project と有効期限（期限付き）を選び、Restricted にする</figcaption>
             </figure>
             <figure>
               <img
@@ -86,7 +86,11 @@
           </div>
           <div class="row">
             <button type="button" data-open="apiKeys">API keys を開く</button>
-            <label><input id="useClipboardKey" type="checkbox" /> コピーしたキーを使う</label>
+            <label
+              ><input id="useClipboardKey" type="checkbox" /><span id="useClipboardKeyLabel">
+                コピーしたキーを使う</span
+              ></label
+            >
           </div>
         </li>
         <li>
@@ -109,8 +113,9 @@
           <p>
             ChatGPT のプラグイン画面で右上の<b>追加</b>から「カスタム MCP
             サーバーを追加」を開きます。名前を入れ、接続タイプを<b>トンネル</b>にして次の Tunnel
-            を選び（一覧に出る名前を押すか ID
-            を貼り付け）、認証を<b>認証なし</b>にします。確認のチェックを入れて「プラグインとして作成」を押してください。作成後の送信の許可などの設定は、このアプリではなく
+            を選び（一覧に出る名前を押すか ID を貼り付け）、認証を<b>認証なし</b>にします（Tunnel
+            接続では runtime キーで守られるためです。サーバー URL
+            で公開する構成では認証なしにしないでください）。確認のチェックを入れて「プラグインとして作成」を押してください。作成後の送信の許可などの設定は、このアプリではなく
             ChatGPT のプラグイン管理画面で行います（「指示の送信を許可」は既定でオフです）。
           </p>
           <div class="shots">

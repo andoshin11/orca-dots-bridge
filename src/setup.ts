@@ -10,6 +10,8 @@ import {
   readFile,
   rename,
   rm,
+  stat,
+  unlink,
   writeFile,
 } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -101,6 +103,8 @@ export type SetupOptions = {
   notificationTunnelId?: string;
   relayPort?: number;
   runtimeKey?: string;
+  /** Rotate an existing runtime key instead of refusing a different one. */
+  replaceRuntimeKey?: boolean;
   installTunnelClient?: boolean;
   installAgent?: boolean;
   /** Node binary for the status Tunnel, used instead of one recorded in the profile. */
@@ -246,7 +250,23 @@ async function supportedNode(io: SetupIo, path: string) {
 async function writeOwnerOnly(path: string, content: string, flag: "w" | "wx" = "wx") {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, content, { mode: 0o600, flag });
+  // `mode` only applies when the file is created; tighten an existing one too.
+  await chmod(path, 0o600);
 }
+
+/** Writes beside the target and renames, so a reader never sees a partial key. */
+async function replaceOwnerOnly(path: string, content: string) {
+  const temp = `${path}.${process.pid}.tmp`;
+  try {
+    await writeOwnerOnly(temp, content);
+    await rename(temp, path);
+  } catch (error) {
+    await unlink(temp).catch(() => undefined);
+    throw error;
+  }
+}
+
+const tooOpen = async (path: string) => ((await stat(path)).mode & 0o077) !== 0;
 
 async function findExecutable(name: string, env: SetupIo["env"], extra: string[]) {
   const dirs = [...(env.PATH ?? "").split(delimiter), ...extra].filter(Boolean);
@@ -496,15 +516,29 @@ export async function runSetup(
       const key = options.runtimeKey.trim();
       if (!runtimeKeyPattern.test(key))
         return add("runtime-key", "error", "runtime_key_format_invalid");
-      if (current === key) return add("runtime-key", "ok", paths.runtimeKey);
-      if (current !== undefined)
-        return add("runtime-key", "error", "runtime_key_exists (delete the file to replace it)");
+      if (current === key && !(await tooOpen(paths.runtimeKey)))
+        return add("runtime-key", "ok", paths.runtimeKey);
+      if (current !== undefined && current !== key && !options.replaceRuntimeKey)
+        return add(
+          "runtime-key",
+          "error",
+          "runtime_key_exists (pass --replace-runtime-key to rotate it)",
+        );
       if (!write) return add("runtime-key", "action", "not written");
-      await writeOwnerOnly(paths.runtimeKey, key);
-      return add("runtime-key", "created", paths.runtimeKey);
+      if (current === undefined) {
+        await writeOwnerOnly(paths.runtimeKey, key);
+        return add("runtime-key", "created", paths.runtimeKey);
+      }
+      await replaceOwnerOnly(paths.runtimeKey, key);
+      return add("runtime-key", "updated", paths.runtimeKey);
     }
-    if (current !== undefined && runtimeKeyPattern.test(current))
-      return add("runtime-key", "ok", paths.runtimeKey);
+    if (current !== undefined && runtimeKeyPattern.test(current)) {
+      if (!(await tooOpen(paths.runtimeKey))) return add("runtime-key", "ok", paths.runtimeKey);
+      if (!write)
+        return add("runtime-key", "action", `permissions too open (chmod 600 ${paths.runtimeKey})`);
+      await chmod(paths.runtimeKey, 0o600);
+      return add("runtime-key", "ok", `${paths.runtimeKey} (permissions fixed)`);
+    }
     if (current !== undefined) return add("runtime-key", "error", "runtime_key_format_invalid");
     add(
       "runtime-key",
@@ -645,7 +679,7 @@ export function nextActions(steps: Step[], settings: Partial<Settings>) {
   const actions: string[] = [];
   if (status("runtime-key") === "action")
     actions.push(
-      `Create a runtime key at ${setupUrls.apiKeys} (Restricted, Tunnels: Read + Use), copy it, then run: pbpaste | node dist/setup.mjs --runtime-key-stdin && pbcopy < /dev/null`,
+      `Create a runtime key at ${setupUrls.apiKeys} (Restricted, Tunnels: Read + Use, with an expiry such as 90 days), copy it, then run: pbpaste | node dist/setup.mjs --runtime-key-stdin && pbcopy < /dev/null`,
     );
   if (status("status-profile") === "action" && !settings.statusTunnelId)
     actions.push(
@@ -720,7 +754,8 @@ async function readStdin() {
 }
 
 const usage = `Usage: setup [doctor] [--status-tunnel-id ID] [--notification-tunnel-id ID] [--relay-port PORT]
-             [--runtime-key-stdin] [--install-tunnel-client] [--install-agent] [--json]
+             [--runtime-key-stdin [--replace-runtime-key]] [--install-tunnel-client]
+             [--install-agent] [--json]
 Prepares this Mac for dot: notification keys, relay plugin config, tunnel-client, Tunnel profiles
 and an optional LaunchAgent for the status Tunnel. "doctor" only checks. Never prints secrets.
 `;
@@ -739,6 +774,7 @@ export function parseSetupArgs(args: string[]) {
     else if (arg === "--notification-tunnel-id") options.notificationTunnelId = value();
     else if (arg === "--relay-port") options.relayPort = Number(value());
     else if (arg === "--runtime-key-stdin") options.runtimeKeyStdin = true;
+    else if (arg === "--replace-runtime-key") options.replaceRuntimeKey = true;
     else if (arg === "--install-tunnel-client") options.installTunnelClient = true;
     else if (arg === "--install-agent") options.installAgent = true;
     else if (arg === "--json") options.json = true;
@@ -746,7 +782,10 @@ export function parseSetupArgs(args: string[]) {
   }
   if (
     options.mode === "doctor" &&
-    (options.runtimeKeyStdin || options.installAgent || options.installTunnelClient)
+    (options.runtimeKeyStdin ||
+      options.replaceRuntimeKey ||
+      options.installAgent ||
+      options.installTunnelClient)
   )
     throw new Error("doctor_is_read_only");
   return options;
