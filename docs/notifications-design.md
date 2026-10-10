@@ -4,16 +4,16 @@
 
 ## 実装
 
-| ファイル                                                                                   | 役割                                                                                                         |
-| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
-| `src/events/orca-contract.ts`、`orca-adapter.ts`、`session-rpc.ts`、`runtime-transport.ts` | host・worktree・pane・terminal・session・世代を一致確認。認証付きUnix socket RPCから対象のイベントだけを取得 |
-| `src/events/engine.ts`、`model.ts`                                                         | 購読所有者の分離、期限・解除、権限再検査、重複抑制、暗号化outbox、上限付き再配送                             |
-| `src/events/http-entry.ts`、`service-endpoint.ts`、`service-key.ts`                        | MCP Events HTTP入口と、専用32バイトキーによる単一サービス主体の認証                                          |
-| `src/events/file-store.ts`、`keychain.ts`                                                  | 暗号化状態のatomic保存・排他、macOS Keychainへの明示的アクセス                                               |
-| `src/events/two-phase-endpoint.ts`、`trial-runner.ts`                                      | 最大10分・1対象、確認通信と通知送信の承認を分離。期限・終了時に監視・接続・試験状態を片付ける                |
-| `src/events/webhook.ts`、`trial-verification-budget.ts`                                    | Standard Webhooks署名、確認通信1回、送信先制約、TLS検証、DNSと送信を合わせた時間制限                         |
-| `src/events/preflight-diagnostics.ts`、`delivery-diagnostics.ts`                           | 秘密・URL・raw errorを記録しない固定診断分類                                                                 |
-| `src/notification-two-phase.ts`                                                            | stdinの初期設定と後続承認を別レコードで受ける専用CLI。URL全文の確認表示はprivate TTYのみ                     |
+| ファイル                                                                                   | 役割                                                                                                            |
+| ------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------- |
+| `src/events/orca-contract.ts`、`orca-adapter.ts`、`session-rpc.ts`、`runtime-transport.ts` | host・worktree・pane・terminal・session・世代を一致確認。認証付きUnix socket RPCから対象のイベントだけを取得    |
+| `src/events/engine.ts`、`model.ts`                                                         | 購読所有者の分離、期限・解除、権限再検査、重複抑制、暗号化outbox、上限付き再配送                                |
+| `src/events/http-entry.ts`、`service-endpoint.ts`、`service-key.ts`                        | MCP Events HTTP入口と、専用32バイトキーによる単一サービス主体の認証                                             |
+| `src/events/file-store.ts`、`keychain.ts`                                                  | 暗号化状態のatomic保存・排他、macOS Keychainへの明示的アクセス                                                  |
+| `src/events/two-phase-endpoint.ts`、`trial-runner.ts`                                      | 1対象・承認から最長10分で自動停止、確認通信と通知送信の承認を分離。期限・終了時に監視・接続・試験状態を片付ける |
+| `src/events/webhook.ts`、`trial-verification-budget.ts`                                    | Standard Webhooks署名、確認通信1回、送信先制約、TLS検証、DNSと送信を合わせた時間制限                            |
+| `src/events/preflight-diagnostics.ts`、`delivery-diagnostics.ts`                           | 秘密・URL・raw errorを記録しない固定診断分類                                                                    |
+| `src/notification-two-phase.ts`                                                            | stdinの初期設定と後続承認を別レコードで受ける専用CLI。URL全文の確認表示はprivate TTYのみ                        |
 
 `notification-trial.ts`は事前にURL承認が済んだ経路、`notification-preflight.ts`と`notification-approval-check.ts`は確認用です。これらはインストール時や通常MCP起動時に自動実行されません。
 

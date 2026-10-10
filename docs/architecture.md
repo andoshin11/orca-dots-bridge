@@ -65,21 +65,21 @@ flowchart LR
 | bridge → Orca（ペインの再確認）        | Orca CLI の `terminal show`                           | この Mac のユーザー権限                                                               |
 | bridge → dot の webhook                | HTTPS（許可したホストのみ、443、リダイレクト不可）    | Standard Webhooks 署名（購読時に dot が渡す secret）、送信待ちは `outbox-v1` で暗号化 |
 
-- 通知は、確認通信 1 回と、private TTY での送信先 URL の確認・承認を経てから始まります。期限は最長 10 分、対象は 1 つです。
+- 通知は、確認通信 1 回と、private TTY での送信先 URL の確認・承認を経てから始まります。いまは試験用の実装なので、1 回の起動で対象にできるのは 1 つだけで、承認から 10 分たつと購読と監視を自動で止めます（再起動しても続きからは再開せず、もう一度承認からやり直します）。
 - ペイン単位（relay plugin）とセッション単位（改造版 Orca）のどちらか一方を、起動時の設定で選びます。違いは[relay plugin による通知](relay-notifications.md)と[通知実装・検証範囲](notifications-design.md)を参照してください。
 
-## 自動通知（実験的）
+## 自動通知（Orca の experimental plugin を利用）
 
-状態確認と明示的な指示送信とは別に、ターン終了・入力待ちの自動通知には、次の2つの経路があります。どちらも最大10分・1対象の試験として動きます。
+状態確認と明示的な指示送信とは別に、ターン終了・入力待ちの自動通知には、次の2つの経路があります。どちらもいまは試験用の実装で、1回の起動で通知の対象にできるのは1つの対象（ペインまたはセッション）だけで、承認してから10分たつと自動的に止まります。
 
 - **セッション単位（`orca.session_activity`）:** 専用RPCを追加したOrcaが必要です。**この公開repoには、そのOrca本体変更も個人用ランチャーも含まれません。** [通知実装・検証範囲](notifications-design.md)と[通知試験のMac mini移行手順](archive/mac-mini-migration.md)に条件をまとめています。
-- **ペイン単位（`orca.pane_activity`）:** 通常版のOrcaに、Orca plugin [orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay) を入れて使います。同じペインで始まった別のセッションの区別と、取りこぼしの検出はできません。準備と制約は[relay pluginによる通知](relay-notifications.md)を参照してください。dotへの実通知は未確認です。
+- **ペイン単位（`orca.pane_activity`）:** 通常版のOrcaに、Orca の experimental plugin [orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay) を入れて使います。同じペインで始まった別のセッションの区別と、取りこぼしの検出はできません。準備と制約は[relay pluginによる通知](relay-notifications.md)を参照してください。dotへの実通知は未確認です。
 
 ## 実装状況
 
 Orca の進捗を音声アシスタントから確認するための、TypeScript 製のブリッジです。概要の読み取りと、明示した1端末への追加指示送信を提供します。CLI とローカル stdio MCP を提供します。接続済みコンピューターのローカルタスク経由で呼び出せます。Secure MCP Tunnelと個人用ChatGPTプラグインを経由するdotからの直接読み取りも検証済みです。その準備（鍵・tunnel-client・profile・LaunchAgentによる常駐）は`setup`コマンド1つで行えます。dotからの指示送信は、ChatGPTのプラグイン管理画面の設定「指示の送信を許可」がオンのときだけ受け付けます（OpenAI MCP Extensionsの`openai/settings`を使用。実エージェントへの送信はまだ行っていません）。音声の往復時間は別途確認してください。[ローカル検証手順](local-validation.md) を同梱しています。
 
-指定セッションのターン終了・入力待ちを扱う通知実装と、最大10分・1対象の二段階試験入口を追加しました。通常版Orcaとrelay pluginで動くペイン単位の経路も追加しました（[relay pluginによる通知](relay-notifications.md)、dotへの実通知は未確認）。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
+指定セッションのターン終了・入力待ちを扱う通知実装と、1対象・承認から10分で自動停止する二段階試験の入口を追加しました。通常版Orcaとrelay pluginで動くペイン単位の経路も追加しました（[relay pluginによる通知](relay-notifications.md)、dotへの実通知は未確認）。2026-10-08の隔離試験ではcallback確認・購読作成・追加承認後のイベント送信1回が成功し、製品側のwebhook起動まで確認しました。イベント種別ごとの実証とdot画面・音声での最終応答は未確認です。試験は終了し、製品側タスクも停止済みです。既存status/sendの接続は変更していません。
 
 [通知実装・検証範囲](notifications-design.md)と[Mac miniへの移行手順](archive/mac-mini-migration.md)を参照してください。通知には専用RPCを追加したOrcaが必要です。このrepoにはOrca本体の変更と個人用ランチャーを含めていないため、cloneだけでは実通知を開始できません。API-keyによる単一サービス主体は今回の限定試験で動作しましたが、本人識別や一般的な製品認証互換性を保証しません。有料Auth0を前提にしていません。[初期のMCP Events調査](archive/mcp-events-compatibility.md)は履歴として残しています。
 
