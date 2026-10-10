@@ -116,7 +116,7 @@ ORCA_BIN="$(command -v orca)" node dist/cli.mjs pane-target --handle '<terminal 
 }
 ```
 
-実際には 1 行の JSON として渡します。`expiresAt` は起動時刻から 10 分以内です。その後の確認通信・private TTY での URL 確認・`activate` レコードは、既存の手順（[Mac mini への移行手順](mac-mini-migration.md) の 4）と同じです。dot から購読入口に届く経路（通知用の Tunnel）の設定は、[通知用 Tunnel の設定](notification-tunnel.md)を参照してください。dot 側の購読ではイベント名 `orca.pane_activity` と、手順 4 の `target` をそのまま使います。手順 2 で表示した API キーは、通知用 Tunnel の設定で Bearer ヘッダーとして使います。
+実際には 1 行の JSON として渡します。`expiresAt` は起動時刻から 10 分以内です。その後の確認通信・private TTY での URL 確認・`activate` レコードは、既存の手順（[Mac mini への移行手順](archive/mac-mini-migration.md) の 4）と同じです。dot から購読入口に届く経路（通知用の Tunnel）の設定は、[通知用 Tunnel の設定](notification-tunnel.md)を参照してください。dot 側の購読ではイベント名 `orca.pane_activity` と、手順 4 の `target` をそのまま使います。手順 2 で表示した API キーは、通知用 Tunnel の設定で Bearer ヘッダーとして使います。
 
 ## 動き
 
