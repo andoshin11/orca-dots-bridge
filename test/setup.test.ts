@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import {
+  launchAgentLabel,
   parseSetupArgs,
   recordedNodePath,
   runSetup,
@@ -28,7 +29,7 @@ async function fakeIo(overrides: Partial<SetupIo> = {}) {
   await executable(orca);
   const stored = new Map<string, Buffer>();
   const calls: { file: string; args: string[] }[] = [];
-  const agent = { loaded: false };
+  const agent = { loaded: new Set<string>() };
   const io: SetupIo = {
     home,
     platform: "darwin",
@@ -61,9 +62,14 @@ async function fakeIo(overrides: Partial<SetupIo> = {}) {
           stdout: JSON.stringify({ ok: true, result: { runtime: { reachable: true } } }),
         };
       if (file === "/bin/launchctl") {
-        if (args[0] === "print") return { code: agent.loaded ? 0 : 113, stdout: "" };
-        if (args[0] === "bootstrap") agent.loaded = true;
-        if (args[0] === "bootout") agent.loaded = false;
+        // Each LaunchAgent is tracked by label (print/bootout) and plist file name (bootstrap).
+        const label = (args.at(-1) ?? "")
+          .split("/")
+          .at(-1)!
+          .replace(/\.plist$/, "");
+        if (args[0] === "print") return { code: agent.loaded.has(label) ? 0 : 113, stdout: "" };
+        if (args[0] === "bootstrap") agent.loaded.add(label);
+        if (args[0] === "bootout") agent.loaded.delete(label);
       }
       return { code: 0, stdout: "" };
     },
@@ -129,8 +135,77 @@ describe("setup", () => {
       statusTunnelId: statusTunnel,
       notificationTunnelId: notificationTunnel,
     });
-    for (const s of steps.filter((s) => !["launch-agent", "status-tunnel"].includes(s.step)))
+    const optional = [
+      "launch-agent",
+      "status-tunnel",
+      "notification-service",
+      "notification-tunnel-agent",
+      "notification-tunnel",
+    ];
+    for (const s of steps.filter((s) => !optional.includes(s.step)))
       expect([s.step, s.status]).toEqual([s.step, "ok"]);
+  });
+
+  test("installs the notification service and its Tunnel as LaunchAgents when asked", async () => {
+    const { io, paths, calls } = await fakeIo();
+    await executable(join(paths.tunnelClientDir, "tunnel-client"));
+    const { steps } = await runSetup(io, { ...full, installNotifications: true });
+    expect(byStep(steps)).toMatchObject({
+      "notification-service": "created",
+      "notification-tunnel-agent": "created",
+    });
+    const service = await readFile(paths.notificationServiceAgent, "utf8");
+    expect(service).toContain("<string>dev.orca-dots-bridge.notifications</string>");
+    expect(service).toContain("<string>ELECTRON_RUN_AS_NODE=1</string>");
+    expect(service).toContain("/opt/bridge/dist/notification-service.mjs");
+    expect(service).toContain("<string>-i</string>");
+    const tunnel = await readFile(paths.notificationTunnelAgent, "utf8");
+    expect(tunnel).toContain("<string>dev.orca-dots-bridge.notification-tunnel</string>");
+    expect(tunnel).toContain(paths.notificationProfile);
+    // tunnel-client checks its target once, so it waits for the service to listen.
+    expect(tunnel).toContain("until /usr/bin/nc -z 127.0.0.1 8787; do sleep 1; done; exec");
+    const booted = calls
+      .filter((c) => c.file === "/bin/launchctl" && c.args[0] === "bootstrap")
+      .map((c) => c.args[2]);
+    expect(booted).toContain(paths.notificationServiceAgent);
+    expect(booted).toContain(paths.notificationTunnelAgent);
+    // Without the flag nothing is installed and doctor only reports.
+    const second = await fakeIo();
+    const { steps: plain } = await runSetup(second.io, full);
+    expect(byStep(plain)["notification-service"]).toBe("skipped");
+    await expect(stat(second.paths.notificationServiceAgent)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  test("doctor reports a loaded notification service that is not listening", async () => {
+    const { io, paths } = await fakeIo();
+    await executable(join(paths.tunnelClientDir, "tunnel-client"));
+    await runSetup(io, { ...full, installNotifications: true });
+    await mkdir(join(paths.root, "notifications"), { recursive: true });
+    await writeFile(join(paths.root, "notifications", "last-error"), "keychain_read_failed\n");
+    let { steps } = await runSetup(io, { mode: "doctor" });
+    expect(steps.find((s) => s.step === "notification-service")).toMatchObject({
+      status: "error",
+      detail: "not listening on 8787 (keychain_read_failed)",
+    });
+    io.probe = async (url) => (url.endsWith("/oauth-protected-resource") ? 404 : 0);
+    ({ steps } = await runSetup(io, { mode: "doctor" }));
+    expect(byStep(steps)["notification-service"]).toBe("ok");
+  });
+
+  test("keeps hand-added notification callback hosts in settings.json", async () => {
+    const { io, paths } = await fakeIo();
+    await runSetup(io, full);
+    const saved = JSON.parse(await readFile(paths.settings, "utf8"));
+    await writeFile(
+      paths.settings,
+      JSON.stringify({ ...saved, notificationCallbackHosts: ["hooks.example.com"] }),
+    );
+    await runSetup(io, { mode: "setup", relayPort: 8790 });
+    expect(JSON.parse(await readFile(paths.settings, "utf8")).notificationCallbackHosts).toEqual([
+      "hooks.example.com",
+    ]);
   });
 
   test("doctor writes nothing", async () => {
@@ -282,7 +357,7 @@ describe("setup after review", () => {
     const { io, paths, calls, agent } = await fakeIo();
     await executable(join(paths.tunnelClientDir, "tunnel-client"));
     await runSetup(io, { ...full, installAgent: true });
-    expect(agent.loaded).toBe(true);
+    expect(agent.loaded.has(launchAgentLabel)).toBe(true);
 
     calls.length = 0;
     let { steps } = await runSetup(io, { mode: "setup", installAgent: true });
@@ -307,7 +382,7 @@ describe("setup after review", () => {
     expect(byStep(steps)["launch-agent"]).toBe("updated");
     const order = calls.filter((c) => c.file === "/bin/launchctl").map((c) => c.args[0]);
     expect(order.indexOf("bootout")).toBeLessThan(order.lastIndexOf("bootstrap"));
-    expect(agent.loaded).toBe(true);
+    expect(agent.loaded.has(launchAgentLabel)).toBe(true);
   });
 });
 
@@ -381,6 +456,10 @@ describe("setup helpers", () => {
     expect(() => parseSetupArgs(["--force"])).toThrow("unknown_argument");
     expect(parseSetupArgs(["--runtime-key-stdin", "--replace-runtime-key"]).replaceRuntimeKey).toBe(
       true,
+    );
+    expect(parseSetupArgs(["--install-notifications"]).installNotifications).toBe(true);
+    expect(() => parseSetupArgs(["doctor", "--install-notifications"])).toThrow(
+      "doctor_is_read_only",
     );
     expect(() => parseSetupArgs(["doctor", "--replace-runtime-key"])).toThrow(
       "doctor_is_read_only",
