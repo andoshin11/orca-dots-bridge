@@ -102,3 +102,17 @@ for (const button of document.querySelectorAll("[data-open]"))
 
 window.bridge.onState(render);
 void window.bridge.state().then(render);
+
+// Clicking a screenshot shows it full size; clicking again or Esc closes it.
+const zoom = document.createElement("dialog");
+zoom.className = "zoom";
+const zoomed = document.createElement("img");
+zoom.append(zoomed);
+document.body.append(zoom);
+zoom.addEventListener("click", () => zoom.close());
+for (const img of document.querySelectorAll("figure img"))
+  img.addEventListener("click", () => {
+    zoomed.src = img.src;
+    zoomed.alt = img.alt;
+    zoom.showModal();
+  });
