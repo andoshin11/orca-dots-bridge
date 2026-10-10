@@ -338,6 +338,52 @@ export class PaneEventsRpc {
     };
     return { owner, stop, isActive: () => active };
   }
+  /**
+   * Re-attaches monitoring for subscriptions persisted by a previous process; safe to
+   * call repeatedly. A pane that now holds something else loses its subscription (the
+   * subscriber's next refresh then fails and it can subscribe again); one that cannot be
+   * read right now is retried on the next call.
+   */
+  resume() {
+    const operation = this.queue.then(async () => {
+      let resumed = 0;
+      for (const s of await this.engine.listSubscriptions()) {
+        if (this.closed) break;
+        const target = paneTargetSchema.safeParse(s.target);
+        if (s.name !== "orca.pane_activity" || !target.success) continue;
+        const key = this.identity(s.owner, {
+          name: s.name,
+          arguments: s.target,
+          delivery: { url: s.url },
+        });
+        if (this.streams.has(key)) continue;
+        try {
+          this.streams.set(key, await this.startStream(s.owner, s.id, target.data));
+          resumed++;
+        } catch (error) {
+          // A pane that now holds something else is gone for good. If Orca is just
+          // not reachable yet (e.g. right after login), keep it for the next attempt.
+          if (error instanceof EventError && error.code === "runtime_target_changed")
+            await this.engine.unsubscribe(s.owner, s.id);
+        }
+      }
+      return resumed;
+    });
+    this.queue = operation.catch(() => undefined);
+    return operation;
+  }
+  /** Stops all monitoring and removes every subscription (notifications turned off). */
+  dropAll() {
+    const operation = this.queue.then(async () => {
+      for (const s of this.streams.values()) await s.stop();
+      this.streams.clear();
+      const subscriptions = await this.engine.listSubscriptions();
+      for (const s of subscriptions) await this.engine.unsubscribe(s.owner, s.id);
+      return subscriptions.length;
+    });
+    this.queue = operation.catch(() => undefined);
+    return operation;
+  }
   activateDeferred() {
     const operation = this.queue.then(async () => {
       if (

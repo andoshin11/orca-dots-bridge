@@ -22,6 +22,7 @@ export default defineConfig({
       "src/notification-approval-check.ts",
       "src/relay-key-setup.ts",
       "src/setup.ts",
+      "src/notification-service.ts",
       "src/trial-key-setup.ts",
     ],
     format: ["esm"],

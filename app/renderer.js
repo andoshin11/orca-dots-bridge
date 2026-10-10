@@ -77,6 +77,7 @@ $("run").addEventListener("click", async () => {
     replaceRuntimeKey: runtimeKeyStored,
     installTunnelClient: $("installTunnelClient").checked,
     installAgent: $("installAgent").checked,
+    installNotifications: $("installNotifications").checked,
   });
   if (response.error) $("result").textContent = errorText[response.error] ?? response.error;
   else {

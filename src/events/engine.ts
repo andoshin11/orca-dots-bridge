@@ -469,6 +469,14 @@ export class EventEngine {
       return true;
     });
   }
+  /** Live subscriptions, for a service that re-attaches monitoring after a restart. */
+  async listSubscriptions() {
+    return this.serial(async () =>
+      this.state.subscriptions
+        .filter((s) => s.expiresAt > this.now())
+        .map((s) => ({ id: s.id, owner: s.owner, name: s.name, target: s.target, url: s.url })),
+    );
+  }
   async hasSubscription(owner: string, id: string) {
     return this.serial(async () =>
       this.state.subscriptions.some(

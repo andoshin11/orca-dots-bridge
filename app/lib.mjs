@@ -34,6 +34,9 @@ export const stepLabels = {
   "status-doctor": "profile の検証",
   "launch-agent": "自動起動（LaunchAgent）",
   "status-tunnel": "状態確認用 Tunnel",
+  "notification-service": "通知サービス（自動起動）",
+  "notification-tunnel-agent": "通知用 Tunnel（自動起動）",
+  "notification-tunnel": "通知用 Tunnel",
 };
 
 /** Where a Node binary usually lives; GUI apps do not inherit the shell PATH. */
@@ -63,6 +66,7 @@ export function parseSetupRequest(input) {
     replaceRuntimeKey: input.useClipboardKey === true && input.replaceRuntimeKey === true,
     installTunnelClient: input.installTunnelClient === true,
     installAgent: input.installAgent === true,
+    installNotifications: input.installNotifications === true,
   };
   for (const key of ["statusTunnelId", "notificationTunnelId"]) {
     const value = typeof input[key] === "string" ? input[key].trim() : "";
