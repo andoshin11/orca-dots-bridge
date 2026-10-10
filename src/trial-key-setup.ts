@@ -1,63 +1,11 @@
-import { randomBytes } from "node:crypto";
 import { writeSync } from "node:fs";
 import { isatty } from "node:tty";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
-import { createMacKeychain, type KeyAccount } from "./events/keychain.js";
-import { KeySetupError, putOwned, setupErrorCode, type SetupKeys } from "./key-setup-shared.js";
+import { createMacKeychain } from "./events/keychain.js";
+import { KeySetupError, setupTrialKeys, type SetupKeys } from "./key-setup-shared.js";
 
-export { KeySetupError } from "./key-setup-shared.js";
-
-/**
- * Creates the two notification-trial keys in the Keychain:
- * - outbox-v1 seals the trial's event outbox and is never shown.
- * - service-v1 authenticates the dot plugin; its API key is handed to
- *   `showApiKey` exactly once, for the user to enter on the product side.
- * Refuses to overwrite either account and removes what it created if a later
- * step fails. An account whose state it cannot establish is never removed
- * (it could be one that existed before); it is reported instead.
- */
-export async function setupTrialKeys(options: {
-  keys: SetupKeys;
-  showApiKey: (apiKey: string) => void;
-  random?: (size: number) => Buffer;
-}) {
-  const random = options.random ?? randomBytes;
-  const outbox = random(32);
-  const service = random(32);
-  const created: KeyAccount[] = [];
-  const uncertain: KeyAccount[] = [];
-  const store = async (account: KeyAccount, key: Buffer) => {
-    const result = await putOwned(options.keys, account, key);
-    if (result.ok) {
-      created.push(account);
-      return;
-    }
-    if (result.written === "yes") created.push(account);
-    if (result.written === "unknown") uncertain.push(account);
-    throw result.error;
-  };
-  try {
-    await store("outbox-v1", outbox);
-    await store("service-v1", service);
-    // The service resolver expects `Authorization: Bearer <base64url(key)>`.
-    // The string form cannot be zeroed; the process exits right after setup.
-    options.showApiKey(service.toString("base64url"));
-  } catch (error) {
-    const leftover = [...uncertain];
-    for (const account of created.reverse()) {
-      try {
-        await options.keys.remove(account);
-      } catch {
-        leftover.push(account);
-      }
-    }
-    throw new KeySetupError(setupErrorCode(error, "trial_key_setup_failed"), leftover);
-  } finally {
-    outbox.fill(0);
-    service.fill(0);
-  }
-}
+export { KeySetupError, setupTrialKeys } from "./key-setup-shared.js";
 
 export function apiKeyText(apiKey: string) {
   return (

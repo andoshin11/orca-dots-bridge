@@ -28,6 +28,12 @@ it("built relay-key-setup shows usage without a port", () => {
   expect(usage.stdout).toMatch(/^Usage: relay-key-setup/);
 });
 
+it("built setup shows usage for unknown arguments", () => {
+  const usage = runBuilt("setup.mjs", ["--force"]);
+  expect(usage.status).toBe(1);
+  expect(usage.stdout).toMatch(/^Usage: setup/);
+});
+
 function keychainFailingAt(phase: "find" | "add" | "verify"): KeychainCommand {
   return async (args) => {
     if (args[0] === "-i") {
