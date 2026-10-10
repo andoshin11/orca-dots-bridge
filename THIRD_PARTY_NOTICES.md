@@ -2,7 +2,7 @@
 
 本プロジェクトのMITライセンスは、第三者コードのライセンスを置き換えません。
 
-現在のGitリポジトリはソースとlockfileを配布対象とし、`node_modules/`と`dist/`は追跡しません。現在のビルド出力では、下記のruntime直接依存は外部importのままです。このファイルは直接依存の通知であり、全推移依存を含む配布物の完全な通知一覧ではありません。依存を同梱する場合は各パッケージのLICENSE・NOTICEと同梱依存の表記を保持してください。
+Gitリポジトリはソースとlockfileだけを追跡し、`node_modules/`と`dist/`は含めません。ビルド（`npm run build`）はruntime依存を`dist/*.mjs`へ同梱し、実際に同梱したパッケージのライセンス本文を`dist/THIRD_PARTY_LICENSES.md`へ自動生成します（source mapから同梱対象を特定します）。GitHub Releaseの配布物にはこのファイルを含めます。メニューバーアプリの配布物には、Electronの`LICENSE`と`LICENSES.chromium.html`も同じフォルダに入ります。このファイル（THIRD_PARTY_NOTICES.md）は直接依存の通知です。
 
 確認範囲と配布時の注意は[依存ライセンス確認](docs/dependency-licenses.md)を参照してください。
 
