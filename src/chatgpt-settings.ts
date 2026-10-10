@@ -3,16 +3,16 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { BridgeError } from "./errors.js";
 
-// Trial of OpenAI's MCP Extensions structured settings (`openai/settings`):
-// ChatGPT renders these on the plugin page with native controls. Nothing here
-// changes what the bridge does to Orca; the only write is this server's own
-// settings file.
+// Settings shown on the ChatGPT plugin page through OpenAI MCP Extensions
+// structured settings (`openai/settings`). ChatGPT renders them with native
+// controls; this server only persists the values. Whoever controls the ChatGPT
+// account can change them, which the owner accepted for personal use.
 
 export const settingsTools = {
   read: "orca_settings_read",
   update: "orca_settings_update",
-  ping: "orca_bridge_ping",
 } as const;
 
 export const settingsCapability = {
@@ -20,66 +20,77 @@ export const settingsCapability = {
 };
 
 const properties = {
-  trialFlag: {
+  sendEnabled: {
     type: "boolean",
-    title: "設定表示の試験",
-    description: "ChatGPT から Mac の設定を読み書きできるかの確認用です。動作には影響しません。",
+    title: "指示の送信を許可",
+    description:
+      "オンにすると、dot から Orca のエージェント1つへ追加の指示を送れます。送る前に ChatGPT が確認します。",
   },
 } as const;
-type Values = { trialFlag: boolean };
-const defaults: Values = { trialFlag: false };
+export type ChatgptSettings = { sendEnabled: boolean };
+// Everything that widens what ChatGPT can do starts off.
+const defaults: ChatgptSettings = { sendEnabled: false };
 
 export function chatgptSettingsPath(home = homedir()) {
   return join(home, ".orca-dots-bridge", "chatgpt-settings.json");
 }
 
-export async function readSettings(path: string): Promise<Values> {
+/** Reads fresh on every call; anything missing or malformed falls back to the closed default. */
+export async function readSettings(path: string): Promise<ChatgptSettings> {
   const text = await readFile(path, "utf8").catch(() => "");
+  let parsed: unknown;
   try {
-    const parsed: unknown = JSON.parse(text);
-    if (typeof parsed === "object" && parsed !== null) {
-      const flag = (parsed as Record<string, unknown>).trialFlag;
-      return { trialFlag: typeof flag === "boolean" ? flag : defaults.trialFlag };
-    }
+    parsed = JSON.parse(text);
   } catch {
-    // Missing or unreadable settings fall back to defaults.
+    return { ...defaults };
   }
-  return { ...defaults };
+  const values = typeof parsed === "object" && parsed !== null ? parsed : {};
+  const send = (values as Record<string, unknown>).sendEnabled;
+  return { sendEnabled: send === true };
 }
 
-async function writeSettings(path: string, values: Values) {
+async function writeSettings(path: string, values: ChatgptSettings) {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   const temp = `${path}.${process.pid}.tmp`;
   await writeFile(temp, `${JSON.stringify(values, null, 2)}\n`, { mode: 0o600 });
   await rename(temp, path);
 }
 
-export function settingsReadResult(values: Values) {
+export function settingsReadResult(values: ChatgptSettings) {
   return {
     schema: { type: "object" as const, properties },
     values,
     layout: [
       {
         kind: "group" as const,
-        title: "Orca Dots Bridge（試験）",
-        items: [
-          { kind: "property" as const, property: "trialFlag" },
-          { kind: "tool" as const, tool: settingsTools.ping },
-        ],
+        title: "Orca への操作",
+        items: [{ kind: "property" as const, property: "sendEnabled" }],
       },
     ],
   };
 }
 
 export const updateShape = {
-  set: z.object({ trialFlag: z.boolean().optional() }).strict(),
+  set: z.object({ sendEnabled: z.boolean().optional() }).strict(),
 };
 
-export async function updateSettings(path: string, set: { trialFlag?: boolean }) {
+export async function updateSettings(path: string, set: Partial<ChatgptSettings>) {
   const values = { ...(await readSettings(path)), ...set };
   await writeSettings(path, values);
   return values;
 }
+
+/** Fails closed unless the ChatGPT setting currently allows sending. */
+export async function assertSendAllowed(path: string) {
+  if (!(await readSettings(path)).sendEnabled)
+    throw new BridgeError(
+      "send_disabled",
+      "Sending is turned off. The user can turn on 指示の送信を許可 in this plugin's settings in ChatGPT. Do not retry until they do.",
+    );
+}
+
+// Settings tools are for ChatGPT's settings page, not for the model in chat.
+const settingsPageOnly = { ui: { visibility: ["app"] } };
 
 export function registerChatgptSettings(server: McpServer, path = chatgptSettingsPath()) {
   const structured = (value: Record<string, unknown>) => ({
@@ -98,6 +109,7 @@ export function registerChatgptSettings(server: McpServer, path = chatgptSetting
         layout: z.array(z.record(z.string(), z.unknown())).optional(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      _meta: settingsPageOnly,
     },
     async () => structured(settingsReadResult(await readSettings(path))),
   );
@@ -106,7 +118,7 @@ export function registerChatgptSettings(server: McpServer, path = chatgptSetting
     {
       title: "Orca Dots Bridge の設定を変える",
       description:
-        "Called by ChatGPT's settings page with changed values only. Do not call from chat. No Orca access.",
+        "Only for ChatGPT's plugin settings page, which sends changed values. Never call from chat. No Orca access.",
       inputSchema: updateShape,
       outputSchema: { values: z.record(z.string(), z.unknown()) },
       annotations: {
@@ -115,24 +127,8 @@ export function registerChatgptSettings(server: McpServer, path = chatgptSetting
         idempotentHint: true,
         openWorldHint: false,
       },
+      _meta: settingsPageOnly,
     },
     async ({ set }) => structured({ values: await updateSettings(path, set) }),
-  );
-  server.registerTool(
-    settingsTools.ping,
-    {
-      title: "Mac への接続を確認",
-      description: "Confirms the plugin reaches the bridge on the Mac. No Orca access.",
-      inputSchema: {},
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    async () => ({
-      content: [
-        {
-          type: "text" as const,
-          text: `Mac の bridge に届きました（${new Date().toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" })}）`,
-        },
-      ],
-    }),
   );
 }
