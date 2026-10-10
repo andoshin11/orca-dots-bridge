@@ -75,4 +75,6 @@ pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id <Tunnel ID>
 
 ## ライセンス
 
+脆弱性の報告は [SECURITY.md](SECURITY.md) を参照してください。
+
 [MIT](LICENSE)。第三者のライセンスは [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) と、配布物の `dist/THIRD_PARTY_LICENSES.md` を参照してください。
