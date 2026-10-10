@@ -10,7 +10,7 @@ Gitで追跡するソース・設定・lockfile・ドキュメントと、GitHub
 
 ## MCP 2.0入口追加時の確認
 
-公式server/client/core 2.3.1のpackage宣言とLICENSEを確認しました。serverはruntime、clientはtest用途です。MCP v2のLICENSEはApache-2.0と未移行MIT contributionsの説明を含みます。[通知本文](../THIRD_PARTY_NOTICES.md)を追加しました。以下の依存件数はv2追加前の監査記録であり、更新後lockfile全体の再監査を意味しません。
+公式server/client/core 2.3.1のpackage宣言とLICENSEを確認しました。serverはruntime依存です（clientは以前test用途で使っていましたが、2026年10月に依存から外しました）。MCP v2のLICENSEはApache-2.0と未移行MIT contributionsの説明を含みます。[通知本文](../THIRD_PARTY_NOTICES.md)を追加しました。以下の依存件数はv2追加前の監査記録であり、更新後lockfile全体の再監査を意味しません。
 
 ## v2追加前に確認した資料
 

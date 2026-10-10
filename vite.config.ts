@@ -14,8 +14,6 @@ export default defineConfig({
     entry: [
       "src/cli.ts",
       "src/mcp.ts",
-      "src/mcp2.ts",
-      "src/mcp-events.ts",
       "src/notification-trial.ts",
       "src/notification-two-phase.ts",
       "src/notification-preflight.ts",
