@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { zodToJsonSchema } from "zod-to-json-schema";
 import {
+  assertAllowed,
   assertSendAllowed,
   fromSettingsPage,
   readSettings,
@@ -10,7 +11,15 @@ import {
   updateShape,
 } from "./chatgpt-settings.js";
 import { BridgeError, errorResult } from "./errors.js";
-import { findSchema, sendSchema, serialize, type Bridge } from "./service.js";
+import {
+  closeAgentSchema,
+  createWorkspaceSchema,
+  findSchema,
+  removeWorkspaceSchema,
+  sendSchema,
+  serialize,
+  type Bridge,
+} from "./service.js";
 import { statusSchema } from "./status.js";
 
 // Protocol-neutral tool definitions shared by the stdio MCP server (src/mcp.ts,
@@ -155,6 +164,66 @@ export function sendTool(
   });
 }
 
+/**
+ * The workspace write tools. With `settingsPath`, each call is refused unless its own
+ * ChatGPT setting is currently on (read fresh on every call).
+ */
+export function workspaceToolDefinitions(bridge: Bridge, options: { settingsPath?: string }) {
+  const gate = async (key: "createEnabled" | "closeEnabled" | "removeEnabled") => {
+    if (options.settingsPath !== undefined) await assertAllowed(options.settingsPath, key);
+  };
+  return [
+    defineTool({
+      name: "orca_create_workspace",
+      description:
+        "Create a new independent Orca workspace (git worktree) in an exact repo, optionally starting an agent with a prompt. Only on the user's explicit request: confirm repo, workspace name, agent and the exact prompt with the user first, and never invent or expand a prompt. repo: exact repo name from orca_find or orca_status. name: letters, digits, '.', '_' or '-'. baseBranch: omit for the repo default. agent: an Orca agent id such as claude or codex; prompt requires agent. The started agent runs with Orca's usual permissions on this Mac. Not idempotent: on an unknown outcome check orca_find (includeIdle) instead of retrying. Returns worktreeId and the terminalHandle when Orca reports one.",
+      inputShape: createWorkspaceSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      run: async (input) => {
+        await gate("createEnabled");
+        return textResult(await bridge.createWorkspace(input));
+      },
+    }),
+    defineTool({
+      name: "orca_close_agent",
+      description:
+        "Close an Orca agent's terminal session (the agent stops; the workspace and its files remain). Confirm the exact target with the user first. Either handle plus expectedWorktreeId (from orca_find or orca_status; refused if the terminal moved), or allInWorkspace: true with an exact worktreeId to close every terminal of that workspace. Prefer this over orca_remove_workspace. No retry on an unknown outcome; check with orca_status.",
+      inputShape: closeAgentSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      run: async (input) => {
+        await gate("closeEnabled");
+        return textResult(await bridge.closeAgent(input));
+      },
+    }),
+    defineTool({
+      name: "orca_remove_workspace",
+      description:
+        "Irreversibly delete one Orca workspace from Orca and git by exact worktreeId: its checkout is deleted and its local branch may be deleted if merged. Only on the user's explicit request, after confirming the workspace with them; prefer orca_close_agent. Never removes a repository's main checkout, never forces: uncommitted or untracked changes are refused (remove_refused). Close its terminals first with orca_close_agent (close_agents_first).",
+      inputShape: removeWorkspaceSchema.shape,
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+      run: async (input) => {
+        await gate("removeEnabled");
+        return textResult(await bridge.removeWorkspace(input));
+      },
+    }),
+  ];
+}
+
 /** The settings page tools ChatGPT calls through OpenAI MCP Extensions (`openai/settings`). */
 export function settingsToolDefinitions(path: string) {
   return [
@@ -186,10 +255,7 @@ export function settingsToolDefinitions(path: string) {
       },
       run: async ({ set }, meta) => {
         // Anything that widens access can only be turned on from the settings page.
-        if (
-          (set.sendEnabled === true || set.notificationsEnabled === true) &&
-          !fromSettingsPage(meta)
-        )
+        if (Object.values(set).some((value) => value === true) && !fromSettingsPage(meta))
           throw new BridgeError(
             "settings_page_only",
             "Turning this on is only accepted from this plugin's settings page in ChatGPT. Ask the user to turn it on there.",

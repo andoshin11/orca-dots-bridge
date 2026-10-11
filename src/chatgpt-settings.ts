@@ -25,6 +25,24 @@ const properties = {
     description:
       "オンにすると、dot から Orca のエージェント1つへ追加の指示を送れます。送る前に ChatGPT が確認します。",
   },
+  closeEnabled: {
+    type: "boolean",
+    title: "エージェントの終了を許可",
+    description:
+      "オンにすると、dot から Orca のエージェントのターミナルを閉じられます（実行中の作業は止まります）。ワークスペースとファイルは残ります。閉じる前に ChatGPT が確認します。",
+  },
+  createEnabled: {
+    type: "boolean",
+    title: "ワークスペースの作成を許可",
+    description:
+      "オンにすると、dot から Orca に新しいワークスペース（git worktree）を作り、指示付きでエージェントを起動できます。起動したエージェントはこの Mac 上で Orca の通常の権限で動きます。作る前に ChatGPT が確認します。",
+  },
+  removeEnabled: {
+    type: "boolean",
+    title: "ワークスペースの削除を許可",
+    description:
+      "オンにすると、dot から Orca のワークスペースを Orca と git から削除できます。元に戻せません（マージ済みならローカルブランチも消えます）。コミットしていない変更があるワークスペースやメインのチェックアウトは削除しません。削除する前に ChatGPT が確認します。",
+  },
   notificationsEnabled: {
     type: "boolean",
     title: "通知を受け取る",
@@ -32,9 +50,11 @@ const properties = {
       "オンにすると、dot に頼んだ Orca のペインのターン終了・入力待ちを通知します（Orca で Agent Status Relay プラグインを有効にしておく必要があります）。オフにすると購読をすべて止めます。",
   },
 } as const;
-export type ChatgptSettings = { sendEnabled: boolean; notificationsEnabled: boolean };
+export type SettingKey = keyof typeof properties;
+export type ChatgptSettings = Record<SettingKey, boolean>;
+const settingKeys = Object.keys(properties) as SettingKey[];
 // Everything that widens what ChatGPT can do starts off.
-const defaults: ChatgptSettings = { sendEnabled: false, notificationsEnabled: false };
+const defaults = Object.fromEntries(settingKeys.map((key) => [key, false])) as ChatgptSettings;
 
 export function chatgptSettingsPath(home = homedir()) {
   return join(home, ".orca-dots-bridge", "chatgpt-settings.json");
@@ -53,10 +73,9 @@ export async function readSettings(path: string): Promise<ChatgptSettings> {
     string,
     unknown
   >;
-  return {
-    sendEnabled: values.sendEnabled === true,
-    notificationsEnabled: values.notificationsEnabled === true,
-  };
+  return Object.fromEntries(
+    settingKeys.map((key) => [key, values[key] === true]),
+  ) as ChatgptSettings;
 }
 
 async function writeSettings(path: string, values: ChatgptSettings) {
@@ -74,7 +93,18 @@ export function settingsReadResult(values: ChatgptSettings) {
       {
         kind: "group" as const,
         title: "Orca への操作",
-        items: [{ kind: "property" as const, property: "sendEnabled" }],
+        items: [
+          { kind: "property" as const, property: "sendEnabled" },
+          { kind: "property" as const, property: "closeEnabled" },
+        ],
+      },
+      {
+        kind: "group" as const,
+        title: "ワークスペース",
+        items: [
+          { kind: "property" as const, property: "createEnabled" },
+          { kind: "property" as const, property: "removeEnabled" },
+        ],
       },
       {
         kind: "group" as const,
@@ -87,7 +117,12 @@ export function settingsReadResult(values: ChatgptSettings) {
 
 export const updateShape = {
   set: z
-    .object({ sendEnabled: z.boolean().optional(), notificationsEnabled: z.boolean().optional() })
+    .object(
+      Object.fromEntries(settingKeys.map((key) => [key, z.boolean().optional()])) as Record<
+        SettingKey,
+        z.ZodOptional<z.ZodBoolean>
+      >,
+    )
     .strict(),
 };
 
@@ -97,14 +132,28 @@ export async function updateSettings(path: string, set: Partial<ChatgptSettings>
   return values;
 }
 
-/** Fails closed unless the ChatGPT setting currently allows sending. */
-export async function assertSendAllowed(path: string) {
-  if (!(await readSettings(path)).sendEnabled)
+/** The gated write capabilities: the error code and what the refusal tells dot. */
+const gates = {
+  sendEnabled: { code: "send_disabled", action: "Sending" },
+  createEnabled: { code: "create_disabled", action: "Creating workspaces" },
+  closeEnabled: { code: "close_disabled", action: "Closing agents" },
+  removeEnabled: { code: "remove_disabled", action: "Removing workspaces" },
+} as const;
+export type GatedSetting = keyof typeof gates;
+
+/** Fails closed unless the ChatGPT setting for this capability is currently on. */
+export async function assertAllowed(path: string, key: GatedSetting) {
+  if (!(await readSettings(path))[key]) {
+    const { code, action } = gates[key];
     throw new BridgeError(
-      "send_disabled",
-      "Sending is turned off. The user can turn on 指示の送信を許可 in this plugin's settings in ChatGPT. Do not retry until they do.",
+      code,
+      `${action} is turned off. The user can turn on ${properties[key].title} in this plugin's settings in ChatGPT. Do not retry until they do.`,
     );
+  }
 }
+
+/** Fails closed unless the ChatGPT setting currently allows sending. */
+export const assertSendAllowed = (path: string) => assertAllowed(path, "sendEnabled");
 
 /**
  * ChatGPT's settings page calls carry `openai/action_name` and no `openai/session`;

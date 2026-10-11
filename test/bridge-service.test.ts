@@ -425,6 +425,9 @@ it("serves every tool of the one plugin and advertises the ChatGPT settings", as
     "orca_status",
     "orca_find",
     "orca_send_instruction",
+    "orca_create_workspace",
+    "orca_close_agent",
+    "orca_remove_workspace",
     "orca_settings_read",
     "orca_settings_update",
     "orca_recent_notifications",
@@ -525,6 +528,43 @@ it("refuses orca_send_instruction until 指示の送信を許可 is on", async (
   expect(orca.calls.some((c) => c[1] === "send")).toBe(true);
 });
 
+it("refuses the workspace tools until each one's own setting is on", async () => {
+  const orca = fakeOrca();
+  const f = await fixture({ enabled: false, sendEnabled: true, bridge: orca.bridge });
+  await f.start();
+  const listed = await f.mcp("tools/list");
+  const tools = Object.fromEntries(listed.result.tools.map((t: any) => [t.name, t]));
+  expect(tools.orca_create_workspace.annotations).toEqual({
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: true,
+  });
+  for (const name of ["orca_close_agent", "orca_remove_workspace"])
+    expect(tools[name].annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    });
+  const calls = [
+    ["orca_create_workspace", { repo: "sample-repo", name: "task" }, "create_disabled"],
+    ["orca_close_agent", { handle: "term_1", expectedWorktreeId: "wt_1" }, "close_disabled"],
+    ["orca_remove_workspace", { worktreeId: "wt_1" }, "remove_disabled"],
+  ] as const;
+  for (const [name, args, code] of calls) {
+    const refused = await f.mcp("tools/call", { name, arguments: args });
+    expect(refused.result.isError).toBe(true);
+    expect(JSON.parse(refused.result.content[0].text).error.code).toBe(code);
+  }
+  expect(orca.calls).toHaveLength(0);
+  // On: the close call passes the gate and reaches Orca (show, then close).
+  await writeFile(f.settingsPath, JSON.stringify({ closeEnabled: true }));
+  const closed = await f.mcp("tools/call", { name: calls[1][0], arguments: calls[1][1] });
+  expect(orca.calls.map((c) => c.slice(0, 2).join(" "))).toContain("terminal show");
+  expect(JSON.parse(closed.result.content[0].text).error?.code).not.toBe("close_disabled");
+});
+
 it("turns settings on only from the ChatGPT settings page", async () => {
   const f = await fixture({ enabled: false });
   await f.start();
@@ -532,25 +572,47 @@ it("turns settings on only from the ChatGPT settings page", async () => {
     f.mcp("tools/call", { name: "orca_settings_update", arguments: { set } }, meta);
   const settings = async () => JSON.parse(await readFile(f.settingsPath, "utf8"));
 
-  for (const meta of [undefined, { "openai/session": "s", "openai/action_name": "x" }]) {
-    const chat = await update({ sendEnabled: true }, meta);
-    expect(chat.result.isError).toBe(true);
-    expect(JSON.parse(chat.result.content[0].text).error.code).toBe("settings_page_only");
-  }
-  expect((await settings()).sendEnabled).toBe(false);
+  for (const meta of [undefined, { "openai/session": "s", "openai/action_name": "x" }])
+    for (const key of ["sendEnabled", "createEnabled", "closeEnabled", "removeEnabled"]) {
+      const chat = await update({ [key]: true }, meta);
+      expect(chat.result.isError).toBe(true);
+      expect(JSON.parse(chat.result.content[0].text).error.code).toBe("settings_page_only");
+      expect((await settings())[key]).not.toBe(true);
+    }
+  // Unknown settings are not accepted at all.
+  const unknown = await update({ forceEnabled: true }, { "openai/action_name": "x" });
+  expect(unknown.result.isError).toBe(true);
+  const workspace = await update(
+    { createEnabled: true, closeEnabled: true, removeEnabled: true },
+    { "openai/action_name": "x" },
+  );
+  expect(workspace.result.structuredContent.values).toMatchObject({
+    createEnabled: true,
+    closeEnabled: true,
+    removeEnabled: true,
+    sendEnabled: false,
+  });
+  const offAgain = await update({
+    createEnabled: false,
+    closeEnabled: false,
+    removeEnabled: false,
+  });
+  expect(offAgain.result.isError).toBeUndefined();
 
   const page = await update(
     { sendEnabled: true, notificationsEnabled: true },
     { "openai/action_name": "x" },
   );
-  expect(page.result.structuredContent).toEqual({
-    values: { sendEnabled: true, notificationsEnabled: true },
-  });
-  const read = await f.mcp("tools/call", { name: "orca_settings_read", arguments: {} });
-  expect(read.result.structuredContent.values).toEqual({
+  const expected = {
     sendEnabled: true,
+    closeEnabled: false,
+    createEnabled: false,
+    removeEnabled: false,
     notificationsEnabled: true,
-  });
+  };
+  expect(page.result.structuredContent).toEqual({ values: expected });
+  const read = await f.mcp("tools/call", { name: "orca_settings_read", arguments: {} });
+  expect(read.result.structuredContent.values).toEqual(expected);
   // Turning something off is accepted from anywhere.
   const off = await update({ notificationsEnabled: false });
   expect(off.result.structuredContent.values.notificationsEnabled).toBe(false);

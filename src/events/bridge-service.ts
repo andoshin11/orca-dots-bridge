@@ -13,6 +13,7 @@ import {
   sendTool,
   settingsToolDefinitions,
   statusTool,
+  workspaceToolDefinitions,
   type ToolDefinition,
 } from "../tools.js";
 import { EventEngine, subscribeSchema, unsubscribeSchema } from "./engine.js";
@@ -29,7 +30,9 @@ import { callbackUrl, createPost, EventError, type Post } from "./webhook.js";
 
 // The always-on bridge service: the single MCP endpoint the one Tunnel forwards
 // to. It serves orca_find, orca_status, orca_send_instruction (refused unless the ChatGPT
-// setting 指示の送信を許可 is on), the ChatGPT settings tools, and MCP Events
+// setting 指示の送信を許可 is on), orca_create_workspace, orca_close_agent and
+// orca_remove_workspace (each refused unless its own setting is on), the ChatGPT
+// settings tools, and MCP Events
 // notifications. It keeps subscriptions across restarts, accepts several panes
 // and lets ChatGPT refresh subscriptions (up to a day each). Whether it may notify
 // at all is the ChatGPT plugin setting 通知を受け取る, read on every subscribe,
@@ -112,7 +115,7 @@ export type BridgeServiceOptions = {
   post?: Post;
   /** How often to check the setting and drop subscriptions when it is off. */
   sweepMs?: number;
-  /** Orca access for orca_find, orca_status and orca_send_instruction (the Orca CLI from ORCA_BIN by default). */
+  /** Orca access for the Orca tools (the Orca CLI from ORCA_BIN by default). */
   bridge?: Bridge;
 };
 
@@ -302,6 +305,8 @@ export async function startBridgeService(options: BridgeServiceOptions) {
     findTool(bridge),
     // Always listed; refused on every call unless 指示の送信を許可 is on.
     sendTool(bridge, { requireExpectedWorktree: true, settingsPath: options.settingsPath }),
+    // Always listed; each refused unless its own setting (作成・終了・削除) is on.
+    ...workspaceToolDefinitions(bridge, { settingsPath: options.settingsPath }),
     ...settingsToolDefinitions(options.settingsPath),
   ];
   const byName = new Map(definitions.map((d) => [d.name, d]));

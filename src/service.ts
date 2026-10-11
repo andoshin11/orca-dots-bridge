@@ -26,26 +26,99 @@ export const logsSchema = z
   .strict();
 
 export const inspectSchema = logsSchema.extend({ expectedWorktreeId: identifier.optional() });
+const terminalHandle = z
+  .string()
+  .regex(/^term_[a-zA-Z0-9_-]+$/)
+  .max(256);
+/** Free text handed to an agent: bounded, printable, never read as a CLI flag. */
+const instructionText = z
+  .string()
+  .min(1)
+  .max(16000)
+  .refine(
+    (value) =>
+      value.trim().length > 0 &&
+      !value.trimStart().startsWith("--") &&
+      Buffer.byteLength(value, "utf8") <= 16000 &&
+      Array.from(value).every((c) => c.charCodeAt(0) >= 32 || "\n\r\t".includes(c)),
+  );
 export const sendSchema = z
   .object({
     expectedWorktreeId: identifier.optional(),
-    handle: z
-      .string()
-      .regex(/^term_[a-zA-Z0-9_-]+$/)
-      .max(256),
-    text: z
-      .string()
-      .min(1)
-      .max(16000)
-      .refine(
-        (value) =>
-          value.trim().length > 0 &&
-          !value.trimStart().startsWith("--") &&
-          Buffer.byteLength(value, "utf8") <= 16000 &&
-          Array.from(value).every((c) => c.charCodeAt(0) >= 32 || "\n\r\t".includes(c)),
-      ),
+    handle: terminalHandle,
+    text: instructionText,
   })
   .strict();
+/** Characters git and Orca accept in a branch/directory name, with nothing path-like. */
+const workspaceName = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/)
+  .refine((s) => !s.includes("..") && !s.endsWith(".lock") && !s.endsWith("."));
+const gitRef = z
+  .string()
+  .regex(/^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/)
+  .refine(
+    (s) =>
+      !s.includes("..") &&
+      !s.includes("//") &&
+      !s.includes("/.") &&
+      !s.endsWith("/") &&
+      !s.endsWith(".lock") &&
+      !s.endsWith("."),
+  );
+export const createWorkspaceSchema = z
+  .object({
+    repo: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine((s) => !s.startsWith("-") && Array.from(s).every((c) => c.charCodeAt(0) >= 32)),
+    name: workspaceName,
+    baseBranch: gitRef.optional(),
+    agent: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9._-]{0,40}$/)
+      .optional(),
+    // A leading dash is refused too: the value must never resemble a flag.
+    prompt: instructionText.refine((value) => !value.trimStart().startsWith("-")).optional(),
+  })
+  .strict();
+export const closeAgentSchema = z
+  .object({
+    handle: terminalHandle.optional(),
+    expectedWorktreeId: identifier.optional(),
+    allInWorkspace: z.literal(true).optional(),
+    worktreeId: identifier.optional(),
+  })
+  .strict();
+const closeAgentTarget = closeAgentSchema.refine((o) =>
+  o.allInWorkspace
+    ? o.worktreeId !== undefined && o.handle === undefined && o.expectedWorktreeId === undefined
+    : o.handle !== undefined && o.expectedWorktreeId !== undefined && o.worktreeId === undefined,
+);
+export const removeWorkspaceSchema = z.object({ worktreeId: identifier }).strict();
+/** Failures where Orca may or may not have acted: the receipt was lost or unreadable. */
+const unknownOutcome = new Set([
+  "timeout",
+  "invalid_json",
+  "schema_changed",
+  "output_limit",
+  "cli_failed",
+]);
+/**
+ * Maps a write command's failure. A missing CLI stays as is; a lost receipt becomes
+ * `<verb>_outcome_unknown` (never retried); any code Orca reported becomes `refused`.
+ */
+function writeFailure(error: unknown, verb: string, refused: string, explain: string) {
+  if (!(error instanceof BridgeError) || error.code === "cli_missing") return error;
+  if (unknownOutcome.has(error.code))
+    return new BridgeError(
+      `${verb}_outcome_unknown`,
+      `The ${verb} outcome could not be verified; Orca may have acted. Check with orca_find or orca_status; do not automatically retry.`,
+    );
+  // error.code is Orca's own code, already restricted to [a-z_].
+  return new BridgeError(refused, `Orca refused (Orca code: ${error.code}). ${explain}`);
+}
 export const findStates = [
   "working",
   "waiting",
@@ -496,6 +569,155 @@ export class Bridge {
             observation: clip(result.prompt.observation, 80),
           }
         : null,
+    };
+  }
+  /** One new, independent workspace; optionally an agent started with the user's prompt. */
+  async createWorkspace(input: unknown) {
+    const o = parse(createWorkspaceSchema, input);
+    if (o.prompt !== undefined && o.agent === undefined)
+      throw new BridgeError("invalid_input", "A prompt needs an agent to start.");
+    let result;
+    try {
+      result = await this.adapter.createWorktree(o);
+    } catch (error) {
+      throw writeFailure(
+        error,
+        "create",
+        "create_failed",
+        "Nothing was retried. Check the exact repo name with orca_find, and whether the name or branch already exists.",
+      );
+    }
+    const handle = result.agentTerminalHandle ?? result.startupTerminal?.handle ?? null;
+    return {
+      createdAt: new Date(this.now()).toISOString(),
+      worktreeId: clip(result.worktree.id, 4096),
+      workspace: clip(result.worktree.displayName ?? o.name, 200),
+      branch: clip(result.worktree.branch?.replace(/^refs\/heads\//, ""), 200),
+      repo: clip(o.repo, 200),
+      agent: o.agent ?? null,
+      promptSent: o.prompt !== undefined,
+      terminalHandle: handle === null ? null : clip(handle, 256),
+      completion: "not_observed",
+      retrySafe: false,
+      nextAction:
+        "Use worktreeId and terminalHandle with orca_status, orca_send_instruction or Orca event subscriptions. Starting an agent is not task completion.",
+    };
+  }
+  /**
+   * Closes one agent's terminal after checking it still belongs to the expected
+   * workspace, or every terminal of one exact workspace. Files stay.
+   */
+  async closeAgent(input: unknown) {
+    const o = parse(closeAgentTarget, input);
+    const explain =
+      "The terminal may still be running or its stop could not be confirmed. Check with orca_status; do not automatically retry.";
+    if (o.allInWorkspace) {
+      const worktreeId = o.worktreeId!,
+        inv = await this.inventory();
+      if (!inv.worktrees.some((w) => w.worktreeId === worktreeId))
+        throw new BridgeError(
+          inv.meta.inventoryIncomplete ? "inventory_incomplete" : "not_found",
+          "Worktree was not in the fetched inventory; nothing was closed.",
+        );
+      let result;
+      try {
+        result = await this.adapter.closeAllTerminals(worktreeId);
+      } catch (error) {
+        throw writeFailure(error, "close", "close_failed", explain);
+      }
+      return {
+        closedAt: new Date(this.now()).toISOString(),
+        scope: "workspace",
+        worktreeId,
+        closedTabs: result.closed ?? null,
+        stoppedProcesses: result.stopped ?? null,
+        workspaceKept: true,
+      };
+    }
+    const handle = o.handle!;
+    // Read the exact target immediately before closing. Never select current/active.
+    const target = await this.adapter.show(handle);
+    if (target.handle !== handle || target.worktreeId !== o.expectedWorktreeId)
+      throw new BridgeError(
+        "target_mismatch",
+        "The terminal is not in the expected workspace anymore; nothing was closed. Rediscover the target with orca_find.",
+      );
+    let close;
+    try {
+      close = await this.adapter.closeTerminal(handle);
+    } catch (error) {
+      throw writeFailure(error, "close", "close_failed", explain);
+    }
+    if (close.handle !== handle)
+      throw new BridgeError("close_outcome_unknown", "Unexpected close receipt target.");
+    return {
+      closedAt: new Date(this.now()).toISOString(),
+      scope: "single_terminal",
+      handle,
+      worktreeId: target.worktreeId,
+      processStopped: close.ptyKilled ?? null,
+      workspaceKept: true,
+    };
+  }
+  /**
+   * Removes one exact non-main workspace with no open terminals or active agents.
+   * Orca's own refusals (uncommitted changes, running sessions) are never forced.
+   */
+  async removeWorkspace(input: unknown) {
+    const { worktreeId } = parse(removeWorkspaceSchema, input),
+      inv = await this.inventory();
+    const w = inv.worktrees.find((w) => w.worktreeId === worktreeId);
+    if (!w)
+      throw new BridgeError(
+        inv.meta.inventoryIncomplete ? "inventory_incomplete" : "not_found",
+        "Worktree was not in the fetched inventory; nothing was removed.",
+      );
+    if (inv.meta.inventoryIncomplete)
+      throw new BridgeError(
+        "inventory_incomplete",
+        "Terminal inventory is incomplete, so open terminals cannot be ruled out; nothing was removed.",
+      );
+    // Only a worktree Orca explicitly reports as a non-main git worktree qualifies:
+    // a missing flag (older runtime) counts as main.
+    if (w.isMainWorktree !== false || (w.workspaceKind !== undefined && w.workspaceKind !== "git"))
+      throw new BridgeError(
+        "remove_refused",
+        "This is the repository's main checkout (or Orca did not confirm it is not); it is never removed. Nothing was removed.",
+      );
+    const now = this.now();
+    const openTerminals = inv.terminals.filter((t) => t.worktreeId === worktreeId).length;
+    const activeAgents = w.agents.filter((a) =>
+      ["working", "waiting", "blocked"].includes(normalizeAgent(a, now).state),
+    ).length;
+    if (
+      openTerminals > 0 ||
+      activeAgents > 0 ||
+      (w.liveTerminalCount ?? 0) > 0 ||
+      w.hasAttachedPty === true
+    )
+      throw new BridgeError(
+        "close_agents_first",
+        `The workspace still has ${openTerminals} open terminal(s) and ${activeAgents} active agent(s). Confirm with the user, close them with orca_close_agent (allInWorkspace), then ask again. Nothing was removed.`,
+      );
+    let result;
+    try {
+      result = await this.adapter.removeWorktree(worktreeId);
+    } catch (error) {
+      throw writeFailure(
+        error,
+        "remove",
+        "remove_refused",
+        "Nothing was forced. Common causes: uncommitted or untracked changes, a running agent session, or a locked worktree. The user can commit or clean up the workspace, or remove it in Orca themselves.",
+      );
+    }
+    return {
+      removedAt: new Date(this.now()).toISOString(),
+      worktreeId,
+      workspace: clip(w.displayName, 200),
+      branch: clip(w.branch.replace(/^refs\/heads\//, ""), 200),
+      removed: result.removed,
+      stillDeletingInBackground: result.removing ?? false,
+      keptBranch: result.preservedBranch ? clip(result.preservedBranch.branchName, 200) : null,
     };
   }
   async logs(input: unknown) {

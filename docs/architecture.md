@@ -39,10 +39,13 @@ flowchart LR
   orcacli -- "ローカル IPC" --> orca
 ```
 
-- bridge サービスが公開するツールは `orca_find`（名前・状態からの候補探し）、`orca_status`、`orca_send_instruction`（`expectedWorktreeId` 必須）、`orca_settings_read` / `orca_settings_update`（ChatGPT の設定画面用、OpenAI MCP Extensions の `openai/settings`）、`orca_recent_notifications` です。あわせて MCP Events（`orca.pane_turn_finished`・`orca.pane_input_required`）を提供します。
-- 状態確認はいつでも使えます。指示の送信は ChatGPT のプラグイン設定「指示の送信を許可」、通知は「通知を受け取る」がオンのときだけ受け付けます（どちらも呼ばれるたびに設定を読み直します）。
+- bridge サービスが公開するツールは `orca_find`（名前・状態からの候補探し）、`orca_status`、`orca_send_instruction`（`expectedWorktreeId` 必須）、`orca_create_workspace`・`orca_close_agent`・`orca_remove_workspace`（ワークスペースの作成・エージェントの終了・ワークスペースの削除）、`orca_settings_read` / `orca_settings_update`（ChatGPT の設定画面用、OpenAI MCP Extensions の `openai/settings`）、`orca_recent_notifications` です。あわせて MCP Events（`orca.pane_turn_finished`・`orca.pane_input_required`）を提供します。
+- 状態確認はいつでも使えます。指示の送信は ChatGPT のプラグイン設定「指示の送信を許可」、ワークスペースの作成・エージェントの終了・ワークスペースの削除はそれぞれ「ワークスペースの作成を許可」「エージェントの終了を許可」「ワークスペースの削除を許可」、通知は「通知を受け取る」がオンのときだけ受け付けます（どれも既定はオフで、呼ばれるたびに設定を読み直します。オンにする変更はプラグイン管理画面からだけ受け付けます）。
 - 指示の送信は、確認済みの terminal handle 1 つへの `orca terminal send` 1 回だけです。
-- stdio の `dist/mcp.mjs`（CLI やローカルの MCP クライアント用）は、同じツール定義を使います。公開するツールは起動時の環境変数で決まります（既定は読み取り 6 つ）。
+- ワークスペースの作成は `orca worktree create --no-parent --setup inherit --repo name:<repo> --name <name> [--base-branch] [--agent] [--prompt]` 1 回だけです（`--activate`・`--run-hooks`・issue/PR の紐付けは渡しません）。
+- エージェントの終了は、handle が今も `expectedWorktreeId` のワークスペースにあることを `terminal show` で確かめてからの `orca terminal close --terminal <handle>`、または完全一致の ID での `orca terminal close --worktree id:<worktreeId> --all` です。ワークスペースとファイルは残ります。
+- ワークスペースの削除は完全一致の `worktreeId` だけを受け、`orca worktree rm --worktree id:<worktreeId>` を `--force`・`--run-hooks` なしで 1 回実行します。事前に `worktree ps` と `terminal list` を読み、Orca が `isMainWorktree: false`（かつ git のワークスペース）と明示していないもの（メインのチェックアウト、またはこの項目のない古い Orca）と、開いているターミナルや作業中・入力待ちのエージェントが残るものは削除しません。コミットしていない変更などで Orca が断った場合は `remove_refused` を返します。
+- stdio の `dist/mcp.mjs`（CLI やローカルの MCP クライアント用）は、同じツール定義を使います。公開するツールは起動時の環境変数で決まります（既定は読み取り 6 つ。作成・終了・削除は `ORCA_BRIDGE_ENABLE_WORKSPACE=1` かつ toolset `full` のときだけ）。
 
 以前は、状態確認用の Tunnel（stdio の `dist/mcp.mjs` を起動）と通知用の Tunnel（通知サービスへ転送）を別々に使っていました。`setup --install-agent` は、その LaunchAgent（`dev.orca-dots-bridge.status-tunnel`・`dev.orca-dots-bridge.notifications`・`dev.orca-dots-bridge.notification-tunnel`）と profile を片付けて、この構成へ移します（手順は README の「以前の 2 つの Tunnel の構成から移る」）。
 

@@ -12,6 +12,14 @@ import {
   updateSettings,
 } from "../src/chatgpt-settings.js";
 
+/** Every setting starts off. */
+const allOff = {
+  sendEnabled: false,
+  closeEnabled: false,
+  createEnabled: false,
+  removeEnabled: false,
+  notificationsEnabled: false,
+};
 const tempHome = () => mkdtemp(join(tmpdir(), "chatgpt-settings-"));
 
 /** Sends JSON-RPC lines to the built MCP server and collects responses by id. */
@@ -87,30 +95,21 @@ describe("ChatGPT plugin settings", () => {
   test("missing or malformed settings read as defaults", async () => {
     const home = await tempHome();
     const path = chatgptSettingsPath(home);
-    expect(await readSettings(path)).toEqual({ sendEnabled: false, notificationsEnabled: false });
+    expect(await readSettings(path)).toEqual({ ...allOff });
     const malformed = join(home, "malformed.json");
     await writeFile(malformed, '{"sendEnabled": "yes"');
-    expect(await readSettings(malformed)).toEqual({
-      sendEnabled: false,
-      notificationsEnabled: false,
-    });
+    expect(await readSettings(malformed)).toEqual({ ...allOff });
     await writeFile(malformed, '{"sendEnabled": "yes"}');
-    expect(await readSettings(malformed)).toEqual({
-      sendEnabled: false,
-      notificationsEnabled: false,
-    });
+    expect(await readSettings(malformed)).toEqual({ ...allOff });
   });
 
   test("updates persist privately and keep a value for every property", async () => {
     const path = chatgptSettingsPath(await tempHome());
     expect(await updateSettings(path, { sendEnabled: true })).toEqual({
+      ...allOff,
       sendEnabled: true,
-      notificationsEnabled: false,
     });
-    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({
-      sendEnabled: true,
-      notificationsEnabled: false,
-    });
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ ...allOff, sendEnabled: true });
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     const result = settingsReadResult(await readSettings(path));
     expect(Object.keys(result.values)).toEqual(Object.keys(result.schema.properties));
@@ -139,12 +138,9 @@ describe("ChatGPT plugin settings", () => {
       settingsTools.update,
     ]);
     expect(on.get(3).result.structuredContent).toEqual({
-      values: { sendEnabled: true, notificationsEnabled: false },
+      values: { ...allOff, sendEnabled: true },
     });
-    expect(await readSettings(chatgptSettingsPath(home))).toEqual({
-      sendEnabled: true,
-      notificationsEnabled: false,
-    });
+    expect(await readSettings(chatgptSettingsPath(home))).toEqual({ ...allOff, sendEnabled: true });
   });
 
   test("only the settings page can turn sending on; anything can turn it off", async () => {
@@ -166,10 +162,7 @@ describe("ChatGPT plugin settings", () => {
       expect(chat.get(id).result.isError).toBe(true);
       expect(chat.get(id).result.content[0].text).toContain("settings page");
     }
-    expect(await readSettings(chatgptSettingsPath(home))).toEqual({
-      sendEnabled: false,
-      notificationsEnabled: false,
-    });
+    expect(await readSettings(chatgptSettingsPath(home))).toEqual({ ...allOff });
 
     const notify = {
       jsonrpc: "2.0",
@@ -188,7 +181,7 @@ describe("ChatGPT plugin settings", () => {
     await updateSettings(chatgptSettingsPath(home), { sendEnabled: true });
     const off = await rpc(env, [initialize, initialized, update(3, false, fromChat)]);
     expect(off.get(3).result.structuredContent).toEqual({
-      values: { sendEnabled: false, notificationsEnabled: false },
+      values: { ...allOff },
     });
   });
 
@@ -229,5 +222,43 @@ describe("ChatGPT plugin settings", () => {
       send,
     ]);
     expect(JSON.parse(allowed.get(3).result.content[0].text).error.code).not.toBe("send_disabled");
+  });
+
+  test("stdio lists workspace tools only for the full toolset with explicit opt-in", async () => {
+    const home = await tempHome();
+    const names = async (env: Record<string, string>) =>
+      (await rpc({ HOME: home, ...env }, [initialize, initialized, list]))
+        .get(2)
+        .result.tools.map((t: { name: string }) => t.name);
+    const workspaceTools = ["orca_create_workspace", "orca_close_agent", "orca_remove_workspace"];
+    for (const env of <Record<string, string>[]>[
+      {},
+      { ORCA_BRIDGE_ENABLE_SEND: "1" },
+      { ORCA_BRIDGE_ENABLE_WORKSPACE: "1", ORCA_BRIDGE_STATUS_ONLY: "1" },
+      { ORCA_BRIDGE_ENABLE_WORKSPACE: "1", ORCA_BRIDGE_TOOLSET: "status-send" },
+    ])
+      for (const name of workspaceTools) expect(await names(env)).not.toContain(name);
+    expect(await names({ ORCA_BRIDGE_ENABLE_WORKSPACE: "1" })).toEqual(
+      expect.arrayContaining(workspaceTools),
+    );
+
+    const create = {
+      jsonrpc: "2.0",
+      id: 3,
+      method: "tools/call",
+      params: { name: "orca_create_workspace", arguments: { repo: "r", name: "task" } },
+    };
+    const env = {
+      HOME: home,
+      ORCA_BRIDGE_ENABLE_WORKSPACE: "1",
+      ORCA_BRIDGE_CHATGPT_SETTINGS: "1",
+      PATH: "/usr/bin:/bin",
+      ORCA_BIN: "/nonexistent/orca",
+    };
+    const refused = await rpc(env, [initialize, initialized, create]);
+    expect(JSON.parse(refused.get(3).result.content[0].text).error.code).toBe("create_disabled");
+    await updateSettings(chatgptSettingsPath(home), { createEnabled: true });
+    const allowed = await rpc(env, [initialize, initialized, create]);
+    expect(JSON.parse(allowed.get(3).result.content[0].text).error.code).toBe("cli_missing");
   });
 });
