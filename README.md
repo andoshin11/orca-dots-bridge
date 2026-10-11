@@ -65,14 +65,14 @@ pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id <Tunnel ID>
 
 ## ドキュメント
 
-| 文書                                             | 内容                                                                                                                                                        |
-| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [メニューバーアプリ](docs/menu-bar-app.md)       | 置き場所、更新、キーの扱い                                                                                                                                  |
-| [ChatGPT（dot）から使う](docs/chatgpt-tunnel.md) | `setup` の詳細、プラグイン設定、手作業での Tunnel 構成                                                                                                      |
-| [CLI で使う](docs/cli.md)                        | CLI のリファレンス、MCP クライアントからの利用、状態の読み方                                                                                                |
-| [アーキテクチャと実装状況](docs/architecture.md) | 通信経路、認証、検証の範囲                                                                                                                                  |
-| [自動通知](docs/notifications.md)                | 準備と使い方、制約（[relay plugin](docs/relay-notifications.md)・[実装と検証](docs/notifications-design.md)・[通知用 Tunnel](docs/notification-tunnel.md)） |
-| [開発](docs/development.md)                      | ビルド、テスト、リリース                                                                                                                                    |
+| 文書                                             | 内容                                                                     |
+| ------------------------------------------------ | ------------------------------------------------------------------------ |
+| [メニューバーアプリ](docs/menu-bar-app.md)       | 置き場所、更新、キーの扱い                                               |
+| [ChatGPT（dot）から使う](docs/chatgpt-tunnel.md) | `setup` の詳細、プラグイン設定、手作業での Tunnel 構成                   |
+| [CLI で使う](docs/cli.md)                        | CLI のリファレンス、MCP クライアントからの利用、状態の読み方             |
+| [アーキテクチャと実装状況](docs/architecture.md) | 通信経路、認証、検証の範囲                                               |
+| [自動通知](docs/notifications.md)                | 準備と使い方、仕組みと制約（[実装と検証](docs/notifications-design.md)） |
+| [開発](docs/development.md)                      | ビルド、テスト、リリース                                                 |
 
 ## ライセンス
 

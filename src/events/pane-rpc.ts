@@ -74,37 +74,20 @@ export const paneCatalog = [
 ];
 
 /**
- * Pane-scoped counterpart of SessionEventsRpc. Same subscribe/defer/activate
- * contract, but events come from relay messages, and every event re-reads the
- * pane identity through the Orca CLI before it is queued.
+ * Serves events/list, events/subscribe and events/unsubscribe for pane targets.
+ * Events come from relay messages, and every event re-reads the pane identity
+ * through the Orca CLI before it is queued.
  */
 export class PaneEventsRpc {
-  private streams = new Map<
-    string,
-    { owner: string; stop: () => Promise<void>; isActive: () => boolean }
-  >();
+  private streams = new Map<string, { owner: string; stop: () => Promise<void> }>();
   private queue: Promise<unknown> = Promise.resolve();
   private closed = false;
-  private trialIdentity: string | undefined;
-  private trialResult: Record<string, unknown> | undefined;
-  private trialEnded = false;
-  private deferred:
-    | {
-        owner: string;
-        params: unknown;
-        result: { id: string; refreshBefore: string; cursor: null; truncated: boolean };
-      }
-    | undefined;
-  private activating = false;
   constructor(
     private engine: EventEngine,
     private source: PaneEventSource,
     private now = Date.now,
     private maxTtlMs = 3600000,
-    private expiresAt = Number.POSITIVE_INFINITY,
-    private singleSubscription = false,
     private diagnostic?: DiagnosticRecord,
-    private deferMonitoring = false,
   ) {}
   dispatch(owner: string, method: string, params: unknown): Promise<Record<string, unknown>> {
     const operation = this.queue.then(() => {
@@ -130,13 +113,6 @@ export class PaneEventsRpc {
       const p = unsubscribeSchema.parse(params);
       paneTargetSchema.parse(p.arguments);
       await this.engine.unsubscribeMatching(owner, p);
-      if (
-        this.deferred &&
-        this.identity(owner, p) ===
-          this.identity(this.deferred.owner, subscribeSchema.parse(this.deferred.params))
-      )
-        this.deferred = undefined;
-      if (this.singleSubscription && this.trialIdentity) this.trialEnded = true;
       const key = this.identity(owner, p);
       const stream = this.streams.get(key);
       if (stream?.owner === owner) {
@@ -146,42 +122,15 @@ export class PaneEventsRpc {
       return {};
     }
     if (method !== "events/subscribe") throw new EventError("method_not_found");
-    if (this.deferMonitoring && !this.activating && (this.deferred || this.trialIdentity))
-      throw new EventError("subscription_limit");
     const p = subscribeSchema.parse(params);
     if (!isPaneEventName(p.name)) throw new EventError("invalid_params");
     const target = paneTargetSchema.parse(p.arguments);
-    const ttlMs = Math.min(p.ttlMs ?? this.maxTtlMs, this.maxTtlMs, this.expiresAt - this.now());
+    const ttlMs = Math.min(p.ttlMs ?? this.maxTtlMs, this.maxTtlMs);
     if (ttlMs < 2000) throw new EventError("invalid_params");
-    const trialIdentity = digest([
-      owner,
-      new URL(p.delivery.url).href,
-      p.name,
-      target,
-      p.delivery.secret,
-    ]);
-    if (this.singleSubscription) {
-      if (this.trialEnded || (this.trialIdentity && trialIdentity !== this.trialIdentity))
-        throw new EventError("subscription_limit");
-      if (this.trialResult) {
-        if (!this.streams.get(this.identity(owner, p))?.isActive())
-          throw new EventError("runtime_unavailable");
-        return { ...this.trialResult };
-      }
-    }
-    const result =
-      this.activating && this.deferred
-        ? this.deferred.result
-        : await this.engine.subscribe(owner, { ...p, ttlMs });
-    if (this.closed || this.now() >= this.expiresAt) {
+    const result = await this.engine.subscribe(owner, { ...p, ttlMs });
+    if (this.closed) {
       await this.engine.unsubscribe(owner, result.id);
       throw new EventError("runtime_unavailable");
-    }
-    if (this.singleSubscription) this.trialIdentity = trialIdentity;
-    if (this.deferMonitoring && !this.activating) {
-      this.deferred = { owner, params: structuredClone(p), result };
-      this.diagnostic?.("notification_approval_waiting");
-      return result;
     }
     const key = this.identity(owner, p);
     const previous = this.streams.get(key);
@@ -192,15 +141,13 @@ export class PaneEventsRpc {
     try {
       this.diagnostic?.("monitoring_start_attempted");
       const stream = await this.startStream(owner, result.id, target, p.name);
-      if (this.closed || this.now() >= this.expiresAt) {
+      if (this.closed) {
         await stream.stop();
         throw new EventError("runtime_unavailable");
       }
       this.diagnostic?.("monitoring_started");
       this.streams.set(key, stream);
-      const response = { ...result };
-      if (this.singleSubscription) this.trialResult = response;
-      return response;
+      return { ...result };
     } catch (error) {
       this.diagnostic?.("monitoring_start_failed");
       await this.engine.unsubscribe(owner, result.id);
@@ -344,7 +291,7 @@ export class PaneEventsRpc {
       clearInterval(retryTimer);
       await events;
     };
-    return { owner, stop, isActive: () => active };
+    return { owner, stop };
   }
   /**
    * Re-attaches monitoring for subscriptions persisted by a previous process; safe to
@@ -392,33 +339,6 @@ export class PaneEventsRpc {
     this.queue = operation.catch(() => undefined);
     return operation;
   }
-  activateDeferred() {
-    const operation = this.queue.then(async () => {
-      if (
-        this.closed ||
-        this.trialEnded ||
-        !this.deferred ||
-        this.activating ||
-        this.now() >= this.expiresAt
-      )
-        throw new EventError("activation_rejected");
-      const pending = this.deferred;
-      if (!(await this.engine.hasSubscription(pending.owner, pending.result.id)))
-        throw new EventError("activation_rejected");
-      this.activating = true;
-      try {
-        return await this.run(pending.owner, "events/subscribe", pending.params);
-      } catch (error) {
-        await this.engine.unsubscribe(pending.owner, pending.result.id);
-        throw error;
-      } finally {
-        this.deferred = undefined;
-        this.activating = false;
-      }
-    });
-    this.queue = operation.catch(() => undefined);
-    return operation;
-  }
   private identity(
     owner: string,
     p: { name: string; arguments: unknown; delivery: { url: string } },
@@ -430,9 +350,5 @@ export class PaneEventsRpc {
     await this.queue;
     for (const s of this.streams.values()) await s.stop();
     this.streams.clear();
-    if (this.deferred) {
-      await this.engine.unsubscribe(this.deferred.owner, this.deferred.result.id);
-      this.deferred = undefined;
-    }
   }
 }
