@@ -36,7 +36,7 @@ flowchart LR
 ```
 
 - dot は 1 つの Secure MCP Tunnel で Mac 上の bridge サービスを呼びます。Tunnel クライアントは Mac から外へ接続するだけで、Mac でポートを開きません。bridge サービスが待ち受けるのは `127.0.0.1` だけです。
-- bridge サービスが公開するツールは `orca_status`（状態確認）、`orca_send_instruction`（指定した1端末への追加指示）、`orca_recent_notifications`（届いた通知の確認）と、ChatGPT の設定画面用の2つです。送信は「指示の送信を許可」、通知は「通知を受け取る」を ChatGPT のプラグイン管理画面でオンにしたときだけ受け付けます。
+- bridge サービスが公開するツールは `orca_find`（名前や状態からの候補探し）、`orca_status`（状態確認）、`orca_send_instruction`（指定した1端末への追加指示）、`orca_recent_notifications`（届いた通知の確認）と、ChatGPT の設定画面用の2つです。送信は「指示の送信を許可」、通知は「通知を受け取る」を ChatGPT のプラグイン管理画面でオンにしたときだけ受け付けます。
 - メニューバーアプリは、Tunnel ができる前の初回準備と、Tunnel が動いているかの表示を受け持ちます。設定や許可は ChatGPT 側の画面で行います。
 
 詳しくは[アーキテクチャと実装状況](docs/architecture.md)を参照してください。
@@ -51,7 +51,7 @@ flowchart LR
    2. Platform で runtime キー（Restricted、Tunnels の Read と Use、期限付き）を作ってコピーする
    3. 「セットアップを実行」を押す（tunnel-client の導入と、bridge サービス・Tunnel のログイン時の自動起動まで行います）
    4. ChatGPT で「カスタム MCP サーバー」を 1 つ追加する（接続タイプはトンネル、認証なし）
-3. **dot から使う。** 「Orca の ○○ の作業はどうなってる？」のように聞きます。指示も送りたい場合は、ChatGPT のプラグイン管理画面で「指示の送信を許可」をオンにします。
+3. **dot から使う。** 「Orca の ○○ の作業はどうなってる？」「orca-dots-bridge の debug のワークスペースは？」「入力待ちのエージェントはいる？」のように、ふだんの言葉で聞きます。正確な名前や ID を伝える必要はありません。dot が候補を探し、複数当てはまるときはどれかを確かめます。指示も送りたい場合は、ChatGPT のプラグイン管理画面で「指示の送信を許可」をオンにします。
 4. **（任意）自動通知を使う。** Orca の「設定」→「プラグイン」→「ソースを管理」で Git のソース `https://github.com/andoshin11/orca-plugins`（ref は `main`）を追加し、**Agent Status Relay** をインストールして「プラグインを有効にする」を押します（権限は events:subscribe）。そのうえで ChatGPT のプラグイン管理画面で「通知を受け取る」をオンにします。Tunnel やプラグインを追加する必要はありません。詳しくは[自動通知](docs/notifications.md)を参照してください。
 
 ### 以前の 2 つの Tunnel の構成から移る

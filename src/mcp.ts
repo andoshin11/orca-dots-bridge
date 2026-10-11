@@ -6,6 +6,7 @@ import { chatgptSettingsPath, settingsCapability } from "./chatgpt-settings.js";
 import {
   callTool,
   defineTool,
+  findTool,
   readOnlyAnnotations,
   sendTool,
   settingsToolDefinitions,
@@ -56,6 +57,7 @@ const readTool = (
   });
 
 register(statusTool(bridge));
+if (!statusOnly) register(findTool(bridge));
 if (!statusOnly && toolset === "full") {
   register(
     readTool(

@@ -39,7 +39,7 @@ flowchart LR
   orcacli -- "ローカル IPC" --> orca
 ```
 
-- bridge サービスが公開するツールは `orca_status`、`orca_send_instruction`（`expectedWorktreeId` 必須）、`orca_settings_read` / `orca_settings_update`（ChatGPT の設定画面用、OpenAI MCP Extensions の `openai/settings`）、`orca_recent_notifications` です。あわせて MCP Events（`orca.pane_turn_finished`・`orca.pane_input_required`）を提供します。
+- bridge サービスが公開するツールは `orca_find`（名前・状態からの候補探し）、`orca_status`、`orca_send_instruction`（`expectedWorktreeId` 必須）、`orca_settings_read` / `orca_settings_update`（ChatGPT の設定画面用、OpenAI MCP Extensions の `openai/settings`）、`orca_recent_notifications` です。あわせて MCP Events（`orca.pane_turn_finished`・`orca.pane_input_required`）を提供します。
 - 状態確認はいつでも使えます。指示の送信は ChatGPT のプラグイン設定「指示の送信を許可」、通知は「通知を受け取る」がオンのときだけ受け付けます（どちらも呼ばれるたびに設定を読み直します）。
 - 指示の送信は、確認済みの terminal handle 1 つへの `orca terminal send` 1 回だけです。
 - stdio の `dist/mcp.mjs`（CLI やローカルの MCP クライアント用）は、同じツール定義を使います。公開するツールは起動時の環境変数で決まります（既定は読み取り 6 つ）。

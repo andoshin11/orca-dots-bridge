@@ -11,11 +11,28 @@ test("built CLI emits machine-readable result and fails unknown commands", () =>
   expect(result.ok).toBe(true);
   expect(result.result.items).toEqual([]);
   expect(result.result.hostCoverageVerified).toBe(false);
+  const found = JSON.parse(
+    execFileSync(
+      process.execPath,
+      [
+        "dist/cli.mjs",
+        "find",
+        "--query",
+        "debug",
+        "--state",
+        "attention",
+        "--include-idle",
+        "true",
+      ],
+      { env, encoding: "utf8" },
+    ),
+  );
+  expect(found.result).toMatchObject({ includeIdle: true, state: "attention", candidates: [] });
   expect(() =>
     execFileSync(process.execPath, ["dist/cli.mjs", "send"], { env, stdio: "pipe" }),
   ).toThrow();
 });
-test("stdio MCP initializes, lists exactly six read-only tools, executes and reports validation errors", async () => {
+test("stdio MCP initializes, lists exactly seven read-only tools, executes and reports validation errors", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
@@ -27,6 +44,7 @@ test("stdio MCP initializes, lists exactly six read-only tools, executes and rep
     await client.connect(transport);
     const listed = await client.listTools();
     expect(listed.tools.map((t) => t.name).sort()).toEqual([
+      "orca_find",
       "orca_overview",
       "orca_status",
       "orca_task_detail",
@@ -89,7 +107,7 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(7);
+    expect(tools).toHaveLength(8);
     expect(tools.find((t) => t.name === "orca_send_instruction")?.annotations).toMatchObject({
       readOnlyHint: false,
       idempotentHint: false,
@@ -189,7 +207,7 @@ test("status-only MCP denies every other tool even with send opt-in", async () =
   }
 });
 
-test("status-send exposes exactly two tools and requires an exact worktree for writes", async () => {
+test("status-send exposes status, find and send only, and requires an exact worktree for writes", async () => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
@@ -204,7 +222,11 @@ test("status-send exposes exactly two tools and requires an exact worktree for w
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
-    expect(tools.map((t) => t.name).sort()).toEqual(["orca_send_instruction", "orca_status"]);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "orca_find",
+      "orca_send_instruction",
+      "orca_status",
+    ]);
     expect(tools.find((t) => t.name === "orca_send_instruction")?.annotations).toMatchObject({
       readOnlyHint: false,
       destructiveHint: true,
@@ -242,10 +264,10 @@ test("status-send exposes exactly two tools and requires an exact worktree for w
 });
 
 test("status-send needs send opt-in and status-only remains the strongest restriction", async () => {
-  for (const overrides of [
-    {},
-    { ORCA_BRIDGE_STATUS_ONLY: "1", ORCA_BRIDGE_ENABLE_SEND: "1" },
-  ] as Record<string, string>[]) {
+  for (const [overrides, expected] of [
+    [{}, ["orca_status", "orca_find"]],
+    [{ ORCA_BRIDGE_STATUS_ONLY: "1", ORCA_BRIDGE_ENABLE_SEND: "1" }, ["orca_status"]],
+  ] as [Record<string, string>, string[]][]) {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [resolve("dist/mcp.mjs")],
@@ -255,7 +277,7 @@ test("status-send needs send opt-in and status-only remains the strongest restri
     const client = new Client({ name: "opt-in-test", version: "1.0.0" });
     try {
       await client.connect(transport);
-      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(["orca_status"]);
+      expect((await client.listTools()).tools.map((t) => t.name)).toEqual(expected);
       expect(
         (
           await client.callTool({

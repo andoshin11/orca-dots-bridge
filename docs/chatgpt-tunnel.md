@@ -25,7 +25,7 @@ pbcopy < /dev/null
 - Tunnelのprofileは`~/.orca-dots-bridge/tunnel/profiles/orca-dots-bridge.yaml`です。転送先は`http://127.0.0.1:8787/mcp`で、bridgeサービスが求めるBearerを`~/.orca-dots-bridge/tunnel/service-authorization`から`file:`で付けます。
 - `--install-agent`は、bridgeサービス（LaunchAgent `dev.orca-dots-bridge.service`）とTunnel（LaunchAgent `dev.orca-dots-bridge.tunnel`）を登録します。どちらもログイン時に起動し、止まっても再起動します。Tunnelはbridgeサービスが待ち受けを始めてから起動します。出力は保存しません。
 - 以前の2つのTunnelの構成（`--status-tunnel-id`と`--notification-tunnel-id`）で準備していた場合も、`--install-agent`を付けて実行すると移行します。保存済みの状態確認用のTunnel IDをそのまま使い、古い通知サービスを止めてから新しいbridgeサービスを起動し、古い状態確認用Tunnelを止めてから新しいTunnelを起動し、最後に古い通知用Tunnelと、このコマンドが作った古いprofileを片付けます。各段階は`legacy-*`の行に表示します。`--status-tunnel-id`は`--tunnel-id`の別名として今も使えます。
-- このTunnelが公開するツールは`orca_status`、`orca_send_instruction`（明示した1端末への追加指示）、設定画面用の`orca_settings_read`・`orca_settings_update`、通知の確認用の`orca_recent_notifications`です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます（ChatGPTが付けるメタデータで見分けており、仕様書にない実測の挙動に頼っています。詳しくは下の「ChatGPTのプラグイン設定で送信を許可する」）。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。自動通知は[自動通知](notifications.md)を参照してください。
+- このTunnelが公開するツールは`orca_find`（全プロジェクト・ワークスペースから、名前や状態に合うエージェントの候補を探す読み取りツール）、`orca_status`、`orca_send_instruction`（明示した1端末への追加指示）、設定画面用の`orca_settings_read`・`orca_settings_update`、通知の確認用の`orca_recent_notifications`です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます（ChatGPTが付けるメタデータで見分けており、仕様書にない実測の挙動に頼っています。詳しくは下の「ChatGPTのプラグイン設定で送信を許可する」）。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。自動通知は[自動通知](notifications.md)を参照してください。
 - `setup`でprofileが変わったあとや移行のあとは、ChatGPTでプラグインの管理画面を開き「ツールを更新」を1回押してください。
 - 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
 
@@ -51,7 +51,7 @@ stdio 対応MCPクライアントの一般的な設定例（未登録）:
 }
 ```
 
-Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_status`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り6つです。送信ツールは下記の明示有効化が必要です。
+Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_find`、`orca_status`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り7つです。送信ツールは下記の明示有効化が必要です。
 
 公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](../examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。クラウド側への接続には、下記のSecure MCP Tunnel経路を利用できます。既定のstdio入口はHTTPポートを開きません。loopback HTTPポートを開くのは、常駐のbridgeサービスだけです。Tunnel・キー・ChatGPTプラグインの設定は利用者が個別に行います。
 
@@ -132,7 +132,7 @@ bridgeサービス、または`ORCA_BRIDGE_CHATGPT_SETTINGS=1`のstdioのbridge�
 ORCA_BRIDGE_TOOLSET=status-send ORCA_BRIDGE_ENABLE_SEND=1 node /absolute/path/to/orca-dots-bridge/dist/mcp.mjs
 ```
 
-このモードの公開ツールは `orca_status` と `orca_send_instruction` だけです。送信opt-inがなければstatusだけです。`ORCA_BRIDGE_STATUS_ONLY=1` は常に優先され、残っている間は送信できません。不正なtoolset名ではサーバーを起動しません。
+このモードの公開ツールは `orca_status`・`orca_find` と `orca_send_instruction` だけです。送信opt-inがなければstatusとfindだけです。`ORCA_BRIDGE_STATUS_ONLY=1` は常に優先され、残っている間は送信できません。不正なtoolset名ではサーバーを起動しません。
 
 送信ツールの引数は `handle`、`expectedWorktreeId`、`text` の3つが必須です。正確なhandleとworktree IDが既に分かっていれば、再探索や子タスクへの委任なしに1回のツール呼び出しで事前確認と送信receiptを返します。サーバーは直前のterminal showでhandle・worktree ID・接続・書込み可否・agent識別を検証してから、terminal sendを1回だけ実行します。CLIおよび従来のfullモードでもexpectedWorktreeIdを任意で指定できます。
 

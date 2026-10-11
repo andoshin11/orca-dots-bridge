@@ -8,7 +8,7 @@
 node /absolute/path/to/orca-dots-bridge/dist/cli.mjs status --repo '<repo>' --name '<task name>'
 ```
 
-MCPでは `orca_status` に `{ "repo": "<repo>", "name": "<task name>" }` を渡します。branch・hostId・idは任意の絞り込みです。永続設定への登録はこの手順に含みません。
+MCPでは `orca_status` に `{ "repo": "<repo>", "name": "<task name>" }`、または `orca_find` が返した `{ "id": "<worktreeId>" }` を渡します。branch・hostId・idは任意の絞り込みです。正確な名前が分からないときは、先に `orca_find` で候補を探します。永続設定への登録はこの手順に含みません。
 
 ## 結果の解釈
 

@@ -28,7 +28,7 @@ Orca ── Agent Status Relay ──▶ bridge サービス（この Mac、常�
 
 ## 使う
 
-dot に「Orca の ○○ の作業が終わったら教えて」のように頼みます。購読の引数は、`orca_status` が返すエージェントの terminal handle と作業ツリー ID（`terminalHandle`・`worktreeId`）です。bridge サービスはその端末の現在のペインを確かめてから購読を受け付けます。
+dot に「Orca の ○○ の作業が終わったら教えて」のように頼みます。正確な名前や ID は不要です。dot が `orca_find`（または `orca_status`）で対象のエージェントを探し、その terminal handle と作業ツリー ID（`terminalHandle`・`worktreeId`）を購読の引数に使います。候補が複数あるときは、dot がどれかを確かめます。bridge サービスはその端末の現在のペインを確かめてから購読を受け付けます。
 
 イベントは種類ごとに分かれています。dot には、届いたイベントの中身（`data`）が見えず、イベント名だけが分かる場合があるためです。
 
