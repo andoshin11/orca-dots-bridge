@@ -18,7 +18,11 @@ This bridge runs on your Mac and can, when you allow it, send an instruction to 
 - Ways for keys stored by `setup` (`~/.orca-dots-bridge/`, macOS Keychain) to leak into logs, command arguments, the renderer of the menu bar app, or other processes.
 - Ways for the local listeners (`127.0.0.1` only) or the Secure MCP Tunnel path to be reached or abused by another user or a remote party.
 
-Known limitations are documented rather than treated as vulnerabilities: the menu bar app is not signed by a developer, anyone who controls the ChatGPT account can change the plugin settings, and telling settings-page calls apart relies on observed (undocumented) ChatGPT behavior. See [docs/chatgpt-tunnel.md](docs/chatgpt-tunnel.md).
+- Ways to make the menu bar app's in-app update install anything other than this repository's release for this Mac: a zip that does not match the `SHA256SUMS` of the same release, a bundle with another identifier or version, a bundle outside the running app's own `Orca Dots Bridge.app` path, or anything run with elevated privileges.
+
+Update trust model: the menu bar app is signed ad hoc only, so in-app updates cannot rely on a developer signature. The app checks `api.github.com` for the latest release of this repository, downloads the zip and `SHA256SUMS` over HTTPS from that release's download URLs, requires the zip's SHA-256 to match its line in `SHA256SUMS`, and requires the extracted bundle to have the running app's identifier, the release's version and a valid (ad hoc) code signature. Authenticity therefore rests on GitHub and on control of this repository's releases; a compromised release is not detected. Installs managed by Homebrew are updated only through `brew upgrade --cask`. Nothing is installed without the user's click, and the helper that swaps the bundle never asks for administrator privileges. See [docs/menu-bar-app.md](docs/menu-bar-app.md#更新).
+
+Known limitations are documented rather than treated as vulnerabilities: the menu bar app is not signed by a developer (so its updates are authenticated only by the GitHub release and its `SHA256SUMS`), anyone who controls the ChatGPT account can change the plugin settings, and telling settings-page calls apart relies on observed (undocumented) ChatGPT behavior. See [docs/chatgpt-tunnel.md](docs/chatgpt-tunnel.md).
 
 ## Supported versions
 

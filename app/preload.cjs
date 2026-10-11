@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld("bridge", {
   open: (page) => ipcRenderer.invoke("open", page),
   copy: (text) => ipcRenderer.invoke("copy", text),
   restartAgent: () => ipcRenderer.invoke("restart-agent"),
+  checkUpdate: () => ipcRenderer.invoke("update-check"),
+  installUpdate: () => ipcRenderer.invoke("update-install"),
+  skipUpdate: () => ipcRenderer.invoke("update-skip"),
+  setAutoUpdateCheck: (value) => ipcRenderer.invoke("update-auto", value),
+  openReleaseNotes: () => ipcRenderer.invoke("update-notes"),
   setOpenAtLogin: (value) => ipcRenderer.invoke("login-item", value),
   onState: (listener) => ipcRenderer.on("state", (_event, state) => listener(state)),
 });

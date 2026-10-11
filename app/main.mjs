@@ -3,6 +3,8 @@ import {
   access,
   constants,
   cp,
+  lstat,
+  readdir,
   readFile,
   readlink,
   rename,
@@ -31,11 +33,14 @@ import {
   nodeCandidates,
   overallLevel,
   parseSetupRequest,
+  referencedRuntimes,
   runtimeKeyFromClipboard,
+  runtimesToPrune,
   stepLabels,
   trayTitle,
   tunnelIdPattern,
 } from "./lib.mjs";
+import { createUpdater } from "./updater.mjs";
 
 // Menu bar shell around the bridge's `setup` command: it shows the doctor result,
 // runs setup with what a person enters, and keeps an eye on the Tunnel.
@@ -113,6 +118,7 @@ let usesBundledRuntime = false;
 let tray;
 let window;
 let busy = false;
+let updater;
 const state = {
   steps: [],
   settings: {},
@@ -131,6 +137,7 @@ function publicState() {
     bridgeDir: io ? dirname(io.distDir) : undefined,
     nodePath: io?.nodePath,
     labels: stepLabels,
+    update: updater?.state(),
   };
 }
 
@@ -241,8 +248,28 @@ function buildMenu(level) {
     return { label: `${stepLabels[name]}: ${step ? step.status : "—"}`, enabled: false };
   };
   const agentLoaded = state.steps.some((s) => s.step === "tunnel-agent" && s.status === "ok");
+  const update = updater?.state();
   return Menu.buildFromTemplate([
     { label: headline, enabled: false },
+    ...(update?.available
+      ? [
+          {
+            label: `アップデートがあります（v${update.available.version}）`,
+            submenu: [
+              {
+                label: update.method === "homebrew" ? "Homebrew で更新" : "ダウンロードして更新",
+                enabled: !busy && !update.phase,
+                // Errors are shown in the window.
+                click: () =>
+                  void updater.install().then(() => updater.state().error && openWindow()),
+              },
+              { label: "リリースノートを開く", click: () => updater.openNotes() },
+              { label: "この版をスキップ", click: () => void updater.skip() },
+              { label: "詳細…", click: openWindow },
+            ],
+          },
+        ]
+      : []),
     line("orca"),
     line("service"),
     line("tunnel"),
@@ -274,6 +301,18 @@ function buildMenu(level) {
               app.setLoginItemSettings({ openAtLogin: item.checked });
               notify();
             },
+          },
+          {
+            label: update?.checking ? "アップデートを確認中…" : "アップデートを確認",
+            enabled: !update?.checking && !update?.phase,
+            // The result (newer version, up to date, or an error) is shown in the window.
+            click: () => void updater.check().then(openWindow),
+          },
+          {
+            label: "自動で更新を確認する",
+            type: "checkbox",
+            checked: update?.autoCheck ?? true,
+            click: (item) => void updater.setAutoCheck(item.checked),
           },
         ]
       : []),
@@ -320,10 +359,59 @@ function registerIpc() {
       };
     }
   });
+  ipcMain.handle("update-check", async () => {
+    await updater.check();
+    return publicState();
+  });
+  ipcMain.handle("update-install", async () => {
+    await updater.install();
+    return publicState();
+  });
+  ipcMain.handle("update-skip", async () => {
+    await updater.skip();
+    return publicState();
+  });
+  ipcMain.handle("update-auto", async (_event, value) => {
+    await updater.setAutoCheck(value === true);
+    return publicState();
+  });
+  ipcMain.handle("update-notes", () => updater.openNotes());
   ipcMain.handle("login-item", (_event, openAtLogin) => {
     if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: openAtLogin === true });
     return publicState();
   });
+}
+
+/**
+ * Removes copies of the bridge left by earlier app versions. Only X.Y.Z folders older
+ * than this app are candidates; the newest older one stays (one previous version), and
+ * any version still named by a managed LaunchAgent or profile stays. If any of those
+ * files cannot be read (other than not existing), nothing is removed.
+ */
+async function pruneRuntimes() {
+  const root = join(home, ".orca-dots-bridge", "runtime");
+  const paths = setup.setupPaths(home);
+  const files = [
+    paths.serviceAgent,
+    paths.tunnelAgent,
+    paths.profile,
+    ...Object.values(paths.legacy),
+  ];
+  const texts = await Promise.all(
+    files.map((file) =>
+      readFile(file, "utf8").catch((error) => {
+        if (error?.code === "ENOENT") return undefined;
+        throw error;
+      }),
+    ),
+  );
+  const names = await readdir(root);
+  for (const name of runtimesToPrune(names, app.getVersion(), referencedRuntimes(texts))) {
+    const dir = join(root, name);
+    const stat = await lstat(dir);
+    if (stat.isDirectory() && !stat.isSymbolicLink())
+      await rm(dir, { recursive: true, force: true });
+  }
 }
 
 /**
@@ -388,9 +476,15 @@ async function start() {
   // Fixing either needs no new input (the saved status Tunnel ID becomes the one
   // Tunnel ID), so do what "セットアップを実行" with automatic start would do.
   if (needsAgentRefresh(state.steps)) await runSetup({ installAgent: true }).catch(() => undefined);
+  // Once the services point at this version, older bridge copies can go.
+  if (usesBundledRuntime) await pruneRuntimes().catch(() => undefined);
+  updater = createUpdater({ onChange: notify, isBusy: () => busy });
+  await updater.init().catch(() => undefined);
   registerIpc();
   notify();
-  if (overallLevel(state.steps) !== "ok") openWindow();
+  const update = updater.state();
+  if (overallLevel(state.steps) !== "ok" || update.notice === "updated" || update.error)
+    openWindow();
   setInterval(() => void probeTunnel(), 30_000);
   setInterval(
     () => void (busy ? undefined : exclusive(doctor).catch(() => undefined)),

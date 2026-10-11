@@ -15,6 +15,17 @@
       <p id="headline" class="muted">確認中…</p>
     </header>
 
+    <section id="updateBanner" class="banner" hidden>
+      <p id="updateTitle"></p>
+      <div class="row" id="updateActions">
+        <button id="installUpdate" type="button" class="primary"></button>
+        <button id="releaseNotes" type="button">リリースノート</button>
+        <button id="skipUpdate" type="button">この版をスキップ</button>
+      </div>
+      <p id="updateStatus" class="small"></p>
+      <pre id="updateDetail" class="small" hidden></pre>
+    </section>
+
     <section>
       <div class="row">
         <h2>状態</h2>
@@ -170,6 +181,11 @@
         <label id="loginItemRow" hidden
           ><input id="openAtLogin" type="checkbox" /> このアプリをログイン時に起動</label
         >
+      </div>
+      <div class="row" id="updateRow" hidden>
+        <button id="checkUpdate" type="button">アップデートを確認</button>
+        <label><input id="autoCheck" type="checkbox" /> 自動で更新を確認する</label>
+        <span id="updateChecked" class="muted small"></span>
       </div>
       <p id="paths" class="muted small"></p>
     </section>
