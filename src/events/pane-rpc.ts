@@ -109,6 +109,23 @@ export const paneCatalog = [
 ];
 
 /**
+ * Agents can report the same state twice within a second (for example a turn end
+ * followed by a final status update); one spoken notification is enough.
+ */
+export const repeatWindowMs = 5000;
+export function createRepeatFilter(windowMs = repeatWindowMs) {
+  const last = new Map<string, { kind: string; at: number }>();
+  return (paneKey: string, kind: string, at: number) => {
+    const previous = last.get(paneKey);
+    if (previous && previous.kind === kind && Math.abs(at - previous.at) < windowMs) return true;
+    last.set(paneKey, { kind, at });
+    // Bounded: forget the oldest pane once many are tracked.
+    if (last.size > 256) last.delete(last.keys().next().value!);
+    return false;
+  };
+}
+
+/**
  * Serves events/list, events/subscribe and events/unsubscribe for pane targets.
  * Events come from relay messages, and every event re-reads the pane identity
  * through the Orca CLI before it is queued.
@@ -124,6 +141,8 @@ export class PaneEventsRpc {
     private now = Date.now,
     private maxTtlMs = 3600000,
     private diagnostic?: DiagnosticRecord,
+    /** Same-kind statuses for one pane within this window are delivered once (0 disables). */
+    private repeatWindow = repeatWindowMs,
   ) {}
   dispatch(owner: string, method: string, params: unknown): Promise<Record<string, unknown>> {
     const operation = this.queue.then(() => {
@@ -339,6 +358,7 @@ export class PaneEventsRpc {
       throw new EventError("runtime_target_changed");
     }
     const pump = this.pump(owner, subscriptionId, target, name, 16);
+    const repeated = createRepeatFilter(this.repeatWindow);
     const onStatus = (status: RelayStatus) => {
       if (!pump.active()) return;
       if (status.worktreeId !== null && status.worktreeId !== target.worktreeId) {
@@ -347,6 +367,7 @@ export class PaneEventsRpc {
       }
       const data = this.dataFor(status, name);
       if (!data) return;
+      if (repeated(status.paneKey, data.kind, status.receivedAt)) return;
       const eventId = digest([
         subscriptionId,
         status.paneKey,
@@ -389,10 +410,12 @@ export class PaneEventsRpc {
     const { watchAll, resolve } = this.source;
     if (!watchAll || !resolve) throw new EventError("runtime_unavailable");
     const pump = this.pump(owner, subscriptionId, scope, name, 32);
+    const repeated = createRepeatFilter(this.repeatWindow);
     const onStatus = (status: RelayStatus) => {
       if (!pump.active()) return;
       const data = this.dataFor(status, name);
       if (!data) return;
+      if (repeated(status.paneKey, data.kind, status.receivedAt)) return;
       // Cheap check first: a worktree scope never needs the inventory for other worktrees.
       if (
         scope.scope === "worktree" &&

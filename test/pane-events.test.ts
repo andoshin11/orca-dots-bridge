@@ -176,7 +176,7 @@ afterEach(async () => {
   vi.useRealTimers();
 });
 type Sent = { url: string; headers: Record<string, string>; body: any };
-async function rpcFixture() {
+async function rpcFixture(options: { repeatWindow?: number } = {}) {
   const sent: Sent[] = [];
   const stages: DiagnosticStage[] = [];
   let current: PaneTarget = target;
@@ -205,6 +205,7 @@ async function rpcFixture() {
     () => t0,
     600000,
     (stage) => stages.push(stage),
+    options.repeatWindow ?? 0,
   );
   clean.push(() => rpc.close());
   const events = () => sent.filter((s) => s.body.type !== "verification").map((s) => s.body);
@@ -565,4 +566,14 @@ it("reports ingest_failed when an event cannot be stored", async () => {
       data: expect.objectContaining({ kind: "monitoring_interrupted", reason: "ingest_failed" }),
     }),
   ]);
+});
+
+it("delivers one event when the agent reports the same state twice within the window", async () => {
+  const f = await rpcFixture({ repeatWindow: 5000 });
+  await f.subscribe();
+  f.hub.publish(status("done", t0 + 100, { receivedAt: t0 + 1000 }));
+  f.hub.publish(status("done", t0 + 900, { receivedAt: t0 + 1900 }));
+  f.hub.publish(status("waiting", t0 + 1000, { receivedAt: t0 + 2000 }));
+  await f.settle(2);
+  expect(f.events().map((e) => e.data.kind)).toEqual(["turn_finished", "input_required"]);
 });
