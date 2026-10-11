@@ -111,7 +111,7 @@ command -v orca
 }
 ```
 
-クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り7ツールが表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`は変更操作です。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
+クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り9ツール（`orca_brief`・`orca_pending_input`を含む）が表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`と`orca_answer`（入力待ちのエージェントの質問に答える）は変更操作です。あわせて、ワークスペースの呼び名を保存する`orca_set_alias`・`orca_remove_alias`も追加されます（手元の`aliases.json`に書くだけで、Orcaは変更しません）。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
 
 起動コマンド自体は`node dist/mcp.mjs`です。手動実行時に何も表示されず待つのはstdio通信待ちであり、ブラウザーで開くURLはありません。通常は手動で別起動せず、MCPクライアントに起動させます。
 
@@ -190,7 +190,7 @@ node dist/cli.mjs send --handle '<terminal handle>' --text '追加で確認し�
 
 呼び出し側は送信を短い単独タスクとして実行し、receiptを得たら直ちに受付結果を返してそのタスクを終了してください。性能調査・ログ追加取得・相手の完了待ちを同じ返信の前に続けないでください。CLIが返した時刻と、dot/音声へ通知できた時刻は別です。後続作業は受付結果を伝えた後の別依頼として行います。これはタスクの結果通知待ちによる遅れを減らす呼び出し方で、ブリッジが音声通知したことを保証するものではありません。
 
-MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り7ツールだけを許可します。
+MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。`orca_answer`と呼び名のツールも同じ設定で追加されます。既定の設定例は読み取り9ツールだけを許可します。
 
 ```sh
 ORCA_BRIDGE_ENABLE_SEND=1 node dist/mcp.mjs

@@ -44,8 +44,10 @@ test("stdio MCP initializes, lists exactly seven read-only tools, executes and r
     await client.connect(transport);
     const listed = await client.listTools();
     expect(listed.tools.map((t) => t.name).sort()).toEqual([
+      "orca_brief",
       "orca_find",
       "orca_overview",
+      "orca_pending_input",
       "orca_status",
       "orca_task_detail",
       "orca_task_logs",
@@ -107,7 +109,25 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
   try {
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
-    expect(tools).toHaveLength(8);
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "orca_answer",
+      "orca_brief",
+      "orca_find",
+      "orca_overview",
+      "orca_pending_input",
+      "orca_remove_alias",
+      "orca_send_instruction",
+      "orca_set_alias",
+      "orca_status",
+      "orca_task_detail",
+      "orca_task_logs",
+      "orca_terminal_inspect",
+      "orca_waiting",
+    ]);
+    expect(tools.find((t) => t.name === "orca_answer")?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    });
     expect(tools.find((t) => t.name === "orca_send_instruction")?.annotations).toMatchObject({
       readOnlyHint: false,
       idempotentHint: false,
@@ -223,7 +243,10 @@ test("status-send exposes status, find and send only, and requires an exact work
     await client.connect(transport);
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "orca_answer",
+      "orca_brief",
       "orca_find",
+      "orca_pending_input",
       "orca_send_instruction",
       "orca_status",
     ]);
@@ -265,7 +288,7 @@ test("status-send exposes status, find and send only, and requires an exact work
 
 test("status-send needs send opt-in and status-only remains the strongest restriction", async () => {
   for (const [overrides, expected] of [
-    [{}, ["orca_status", "orca_find"]],
+    [{}, ["orca_status", "orca_find", "orca_brief", "orca_pending_input"]],
     [{ ORCA_BRIDGE_STATUS_ONLY: "1", ORCA_BRIDGE_ENABLE_SEND: "1" }, ["orca_status"]],
   ] as [Record<string, string>, string[]][]) {
     const transport = new StdioClientTransport({

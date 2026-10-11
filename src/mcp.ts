@@ -4,9 +4,13 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { Bridge, pageShape, detailSchema, logsSchema, inspectSchema } from "./service.js";
 import { chatgptSettingsPath, settingsCapability } from "./chatgpt-settings.js";
 import {
+  aliasToolDefinitions,
+  answerTool,
+  briefTool,
   callTool,
   defineTool,
   findTool,
+  pendingInputTool,
   readOnlyAnnotations,
   sendTool,
   settingsToolDefinitions,
@@ -62,7 +66,11 @@ const readTool = (
   });
 
 register(statusTool(bridge));
-if (!statusOnly) register(findTool(bridge));
+if (!statusOnly) {
+  register(findTool(bridge));
+  register(briefTool(bridge));
+  register(pendingInputTool(bridge));
+}
 if (!statusOnly && toolset === "full") {
   register(
     readTool(
@@ -113,6 +121,13 @@ if (sendEnabled)
       ...(chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {}),
     }),
   );
+// Aliases only write a local label file (aliases.json), but the default server stays
+// read-only, so they come with either explicit write opt-in.
+if (toolset === "full" && (sendEnabled || workspaceEnabled))
+  for (const def of aliasToolDefinitions(bridge)) register(def);
+// Answering a pending question sends input, so it shares the send opt-in.
+if (sendEnabled)
+  register(answerTool(bridge, chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {}));
 if (workspaceEnabled)
   for (const def of workspaceToolDefinitions(
     bridge,
