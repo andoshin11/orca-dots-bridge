@@ -7,6 +7,11 @@ import {
 } from "@modelcontextprotocol/server";
 import { EventError } from "./webhook.js";
 import type { DiagnosticRecord, DiagnosticStage } from "./preflight-diagnostics.js";
+/** Optional MCP tools served next to the events, scoped to the verified owner. */
+export type SessionTools = {
+  list: Record<string, unknown>[];
+  call: (owner: string, name: string, args: unknown) => Promise<Record<string, unknown>>;
+};
 /** No listener or credential defaults. The caller supplies a verified token resolver and durable engine. */
 export function createSessionMcpHttpEntry(
   rpc: {
@@ -20,6 +25,7 @@ export function createSessionMcpHttpEntry(
   },
   resolveOwner: (authorization: string | undefined) => Promise<string>,
   diagnostic?: DiagnosticRecord,
+  tools?: SessionTools,
 ) {
   return async (request: Request): Promise<Response> => {
     let owner: string;
@@ -54,6 +60,7 @@ export function createSessionMcpHttpEntry(
         const methods: Record<string, DiagnosticStage> = {
           "server/discover": "method_discover",
           "tools/list": "method_tools_list",
+          "tools/call": "method_tools_call",
           "events/list": "method_events_list",
           "events/subscribe": "method_subscribe",
           "events/unsubscribe": "method_unsubscribe",
@@ -75,9 +82,28 @@ export function createSessionMcpHttpEntry(
           async () => {
             dispatched = true;
             diagnostic?.("rpc_dispatch");
-            return { tools: [] };
+            return { tools: structuredClone(tools?.list ?? []) };
           },
         );
+        if (tools)
+          server.server.setRequestHandler(
+            "tools/call",
+            { params: fromJsonSchema({ type: "object" }) },
+            async (params) => {
+              dispatched = true;
+              diagnostic?.("rpc_dispatch");
+              const call = z
+                .object({ name: z.string(), arguments: z.unknown().optional() })
+                .safeParse(params);
+              if (!call.success) throw new ProtocolError(-32602, "Invalid tool call");
+              try {
+                return await tools.call(owner, call.data.name, call.data.arguments ?? {});
+              } catch {
+                diagnostic?.("rpc_rejected");
+                throw new ProtocolError(-32602, "Tool call rejected");
+              }
+            },
+          );
         for (const method of ["events/list", "events/subscribe", "events/unsubscribe"]) {
           server.server.setRequestHandler(
             method,

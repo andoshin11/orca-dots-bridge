@@ -30,6 +30,7 @@ export const diagnosticStages = [
   "envelope_invalid",
   "method_discover",
   "method_tools_list",
+  "method_tools_call",
   "method_events_list",
   "method_subscribe",
   "method_unsubscribe",
