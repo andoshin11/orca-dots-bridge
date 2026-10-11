@@ -7,7 +7,6 @@ import {
   transportReason,
 } from "../src/events/webhook.js";
 import { recordDeliveryFailure } from "../src/events/delivery-diagnostics.js";
-import { limitTrialVerification } from "../src/events/trial-verification-budget.js";
 import { EventEngine } from "../src/events/engine.js";
 const url = "https://receiver.example.com/PRIVATE_SENTINEL";
 it.each([
@@ -96,24 +95,14 @@ it.each([
   }) as unknown as typeof import("node:https").request;
   const send = createNodePinnedSend(request);
   const stages: string[] = [];
-  const post = limitTrialVerification(
-    createPost(["receiver.example.com"], async () => ["8.8.8.8"], send),
-    Date.now() + 30000,
-    Date.now,
-    (stage) => stages.push(stage),
-  );
-  await expect(post(url, {}, '{"type":"verification"}')).rejects.toMatchObject({
-    code: "delivery_failed",
-    reason,
-  });
-  expect(stages).toContain(
+  const post = createPost(["receiver.example.com"], async () => ["8.8.8.8"], send);
+  const failure = await post(url, {}, '{"type":"verification"}').catch((e: unknown) => e);
+  expect(failure).toMatchObject({ code: "delivery_failed", reason });
+  recordDeliveryFailure(failure, (stage) => stages.push(stage));
+  expect(stages).toEqual([
     reason === "unknown" ? "callback_unknown_failure" : "callback_" + reason,
-  );
+  ]);
   expect(JSON.stringify(stages)).not.toContain("PRIVATE_SENTINEL");
-  await expect(post(url, {}, '{"type":"verification"}')).rejects.toThrow(
-    "callback_approval_required",
-  );
-  expect(stages.filter((x) => x === "challenge_attempted")).toHaveLength(1);
 });
 it("does not stringify an error code object or read its message, stack or cause", () => {
   const poison = {

@@ -58,8 +58,8 @@ export function setupErrorCode(error: unknown, fallback: string) {
 }
 
 /**
- * Creates the two notification-trial keys in the Keychain:
- * - outbox-v1 seals the trial's event outbox and is never shown.
+ * Creates the two notification keys in the Keychain (named after the first trials):
+ * - outbox-v1 seals the notification service's event store and is never shown.
  * - service-v1 authenticates the dot plugin; its API key is handed to
  *   `showApiKey` exactly once, for the user to enter on the product side.
  * Refuses to overwrite either account and removes what it created if a later

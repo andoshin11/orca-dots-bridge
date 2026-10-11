@@ -10,7 +10,7 @@ Orca CLI を bridge 経由で呼び、状態の確認と1端末への追加指�
 - **Node.jsとnpm**：[Node.js公式配布](https://nodejs.org/en/download)からNode **24.x（24.11.0以上）**と同梱npmを導入します。導入後にターミナルを開き直し、`node --version`と`npm --version`で確認してください。対応Nodeの全範囲は下の開発用コマンド欄に記載しています。
 - **Orcaアプリと付属CLI**：[Orca公式インストール案内](https://www.onorca.dev/docs/install)から、このMacに合うApple Silicon / Intel版を導入して起動します。アプリのSettingsで「Orca CLI」を探し、CLIを登録してください。[公式CLI案内](https://www.onorca.dev/docs/cli/overview)ではGeneral内、別の参照ページではExperimental内と記載されています。表示は版によって確認してください。
 
-基本の読み取りは**Orca 1.4.220**で実測済みです。通常版のCLIを使い、通知試験用の改造は不要です。別バージョンの互換性は保証していません。旧版の配布先はOrca公式インストール案内の「Older versions」から確認できます。指示送信には、接続・書込み可否・agent識別情報を返す対応CLI/runtimeが必要です。
+基本の読み取りは**Orca 1.4.220**で実測済みです。通常版のCLIを使い、Orca本体の改造は不要です。別バージョンの互換性は保証していません。旧版の配布先はOrca公式インストール案内の「Older versions」から確認できます。指示送信には、接続・書込み可否・agent識別情報を返す対応CLI/runtimeが必要です。
 
 Orcaの初期設定を済ませ、確認したいリポジトリと作業をアプリで開いたまま、次を実行します。
 

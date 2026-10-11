@@ -14,10 +14,6 @@ export default defineConfig({
     entry: [
       "src/cli.ts",
       "src/mcp.ts",
-      "src/notification-trial.ts",
-      "src/notification-two-phase.ts",
-      "src/notification-preflight.ts",
-      "src/notification-approval-check.ts",
       "src/relay-key-setup.ts",
       "src/setup.ts",
       "src/notification-service.ts",
