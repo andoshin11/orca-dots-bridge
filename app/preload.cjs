@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld("bridge", {
   setAutoUpdateCheck: (value) => ipcRenderer.invoke("update-auto", value),
   openReleaseNotes: () => ipcRenderer.invoke("update-notes"),
   setOpenAtLogin: (value) => ipcRenderer.invoke("login-item", value),
+  auditLog: () => ipcRenderer.invoke("audit-log"),
   onState: (listener) => ipcRenderer.on("state", (_event, state) => listener(state)),
 });

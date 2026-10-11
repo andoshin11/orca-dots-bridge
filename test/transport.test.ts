@@ -1,8 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { expect, test } from "vite-plus/test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+// The stdio server records write calls under $HOME; never the real one.
+const home = mkdtempSync(join(tmpdir(), "transport-home-"));
 test("built CLI emits machine-readable result and fails unknown commands", () => {
   const env = { ...process.env, ORCA_BIN: resolve("test/fixtures/orca.mjs"), ORCA_ENVIRONMENT: "" };
   const result = JSON.parse(
@@ -36,7 +40,7 @@ test("stdio MCP initializes, lists exactly seven read-only tools, executes and r
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
-    env: { ORCA_BIN: resolve("test/fixtures/orca.mjs"), ORCA_ENVIRONMENT: "" },
+    env: { HOME: home, ORCA_BIN: resolve("test/fixtures/orca.mjs"), ORCA_ENVIRONMENT: "" },
     stderr: "pipe",
   });
   const client = new Client({ name: "bridge-test", version: "1.0.0" });
@@ -44,6 +48,7 @@ test("stdio MCP initializes, lists exactly seven read-only tools, executes and r
     await client.connect(transport);
     const listed = await client.listTools();
     expect(listed.tools.map((t) => t.name).sort()).toEqual([
+      "orca_audit_log",
       "orca_brief",
       "orca_find",
       "orca_overview",
@@ -99,6 +104,7 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
     env: {
+      HOME: home,
       ORCA_BIN: resolve("test/fixtures/orca.mjs"),
       ORCA_ENVIRONMENT: "",
       ORCA_BRIDGE_ENABLE_SEND: "1",
@@ -111,6 +117,7 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
       "orca_answer",
+      "orca_audit_log",
       "orca_brief",
       "orca_find",
       "orca_overview",
@@ -138,6 +145,24 @@ test("opt-in MCP send is explicitly mutating and non-idempotent", async () => {
       arguments: { handle: "term_fixture", text: "synthetic instruction" },
     });
     expect(response.isError).not.toBe(true);
+    // The call is recorded in $HOME/.orca-dots-bridge/audit.log and readable back.
+    const log = await client.callTool({
+      name: "orca_audit_log",
+      arguments: { tool: "orca_send_instruction", limit: 1 },
+    });
+    expect(JSON.parse((log.content as { text: string }[])[0]!.text).entries).toEqual([
+      {
+        time: expect.any(String),
+        source: "stdio",
+        tool: "orca_send_instruction",
+        outcome: "ok",
+        target: { handle: "term_fixture" },
+        summary: "synthetic instruction",
+      },
+    ]);
+    expect(readFileSync(join(home, ".orca-dots-bridge", "audit.log"), "utf8")).toContain(
+      '"source":"stdio"',
+    );
     const content = response.content as { text: string }[];
     expect(JSON.parse(content[0]!.text)).toMatchObject({
       accepted: true,
@@ -204,6 +229,7 @@ test("status-only MCP denies every other tool even with send opt-in", async () =
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
     env: {
+      HOME: home,
       ORCA_BIN: resolve("test/fixtures/orca.mjs"),
       ORCA_BRIDGE_STATUS_ONLY: "1",
       ORCA_BRIDGE_ENABLE_SEND: "1",
@@ -232,6 +258,7 @@ test("status-send exposes status, find and send only, and requires an exact work
     command: process.execPath,
     args: [resolve("dist/mcp.mjs")],
     env: {
+      HOME: home,
       ORCA_BIN: resolve("test/fixtures/orca.mjs"),
       ORCA_BRIDGE_TOOLSET: "status-send",
       ORCA_BRIDGE_ENABLE_SEND: "1",
@@ -244,6 +271,7 @@ test("status-send exposes status, find and send only, and requires an exact work
     const tools = (await client.listTools()).tools;
     expect(tools.map((t) => t.name).sort()).toEqual([
       "orca_answer",
+      "orca_audit_log",
       "orca_brief",
       "orca_find",
       "orca_pending_input",
@@ -288,13 +316,13 @@ test("status-send exposes status, find and send only, and requires an exact work
 
 test("status-send needs send opt-in and status-only remains the strongest restriction", async () => {
   for (const [overrides, expected] of [
-    [{}, ["orca_status", "orca_find", "orca_brief", "orca_pending_input"]],
+    [{}, ["orca_status", "orca_find", "orca_brief", "orca_pending_input", "orca_audit_log"]],
     [{ ORCA_BRIDGE_STATUS_ONLY: "1", ORCA_BRIDGE_ENABLE_SEND: "1" }, ["orca_status"]],
   ] as [Record<string, string>, string[]][]) {
     const transport = new StdioClientTransport({
       command: process.execPath,
       args: [resolve("dist/mcp.mjs")],
-      env: { ORCA_BRIDGE_TOOLSET: "status-send", ...overrides },
+      env: { HOME: home, ORCA_BRIDGE_TOOLSET: "status-send", ...overrides },
       stderr: "pipe",
     });
     const client = new Client({ name: "opt-in-test", version: "1.0.0" });

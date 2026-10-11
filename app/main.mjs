@@ -4,6 +4,7 @@ import {
   constants,
   cp,
   lstat,
+  open,
   readdir,
   readFile,
   readlink,
@@ -28,10 +29,13 @@ import {
   Tray,
 } from "electron";
 import {
+  auditViewLimit,
   externalPages,
+  formatAuditEntry,
   needsAgentRefresh,
   nodeCandidates,
   overallLevel,
+  parseAuditLog,
   parseSetupRequest,
   referencedRuntimes,
   runtimeKeyFromClipboard,
@@ -326,7 +330,45 @@ function buildMenu(level) {
   ]);
 }
 
+/**
+ * The end of one audit log file (the bridge's 操作の記録), never through a symlink and at
+ * most ~1 MB; "" when it is missing or unreadable.
+ */
+async function readAuditFile(path) {
+  let handle;
+  try {
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  } catch {
+    return "";
+  }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile()) return "";
+    const length = Math.min(info.size, 1100 * 1024);
+    const buffer = Buffer.alloc(length);
+    await handle.read(buffer, 0, length, info.size - length);
+    const text = buffer.toString("utf8");
+    return info.size > length ? text.slice(text.indexOf("\n") + 1) : text;
+  } catch {
+    return "";
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+/** The newest rows of ~/.orca-dots-bridge/audit.log (and its previous file). */
+async function auditLog() {
+  const path = join(home, ".orca-dots-bridge", "audit.log");
+  const current = await readAuditFile(path);
+  const texts = [current];
+  if (parseAuditLog([current], auditViewLimit).length < auditViewLimit)
+    texts.unshift(await readAuditFile(`${path}.1`));
+  // Formatted here: the page only places these strings with textContent.
+  return { rows: parseAuditLog(texts, auditViewLimit).map((entry) => formatAuditEntry(entry)) };
+}
+
 function registerIpc() {
+  ipcMain.handle("audit-log", () => auditLog().catch(() => ({ rows: [], error: true })));
   ipcMain.handle("state", () => publicState());
   ipcMain.handle("doctor", async () => {
     try {

@@ -4,11 +4,13 @@ import { dirname, join } from "node:path";
 import { z } from "zod";
 import { createRunner } from "../adapter.js";
 import { AliasStore } from "../aliases.js";
+import { createAuditLog, type AuditLog } from "../audit.js";
 import { readSettings, settingsCapability } from "../chatgpt-settings.js";
 import { Bridge } from "../service.js";
 import {
   aliasToolDefinitions,
   answerTool,
+  auditLogTool,
   briefTool,
   callTool,
   defineTool,
@@ -17,6 +19,7 @@ import {
   pendingInputTool,
   sendTool,
   settingsToolDefinitions,
+  startTaskTool,
   statusTool,
   workspaceToolDefinitions,
   type ToolDefinition,
@@ -42,8 +45,9 @@ import { callbackUrl, createPost, EventError, type Post } from "./webhook.js";
 // The always-on bridge service: the single MCP endpoint the one Tunnel forwards
 // to. It serves orca_find, orca_status, orca_brief, orca_pending_input, orca_send_instruction and
 // orca_answer (both refused unless the ChatGPT setting 指示の送信を許可 is on), orca_create_workspace, orca_close_agent and
-// orca_remove_workspace (each refused unless its own setting is on), the local alias
-// tools, the ChatGPT settings tools, and MCP Events
+// orca_remove_workspace (each refused unless its own setting is on; orca_start_task
+// shares the 作成 setting), the local alias tools, the ChatGPT settings tools, the
+// audit log of every write call (orca_audit_log), and MCP Events
 // notifications. It keeps subscriptions across restarts, accepts several panes
 // and lets ChatGPT refresh subscriptions (up to a day each). Whether it may notify
 // at all is the ChatGPT plugin setting 通知を受け取る, read on every subscribe,
@@ -189,6 +193,10 @@ export type BridgeServiceOptions = {
   bridge?: Bridge;
   /** Workspace aliases; `aliases.json` next to the ChatGPT settings by default. */
   aliasesPath?: string;
+  /** The record of write calls; `audit.log` next to the ChatGPT settings by default. */
+  audit?: AuditLog;
+  /** Task template overrides; `templates.json` next to the ChatGPT settings by default. */
+  templatesPath?: string;
 };
 
 export async function startBridgeService(options: BridgeServiceOptions) {
@@ -241,6 +249,7 @@ export async function startBridgeService(options: BridgeServiceOptions) {
   bridge.aliases ??= new AliasStore(
     options.aliasesPath ?? join(dirname(options.settingsPath), "aliases.json"),
   );
+  const audit = options.audit ?? createAuditLog(join(dirname(options.settingsPath), "audit.log"));
   // Scope subscriptions resolve each relay status to its repo and terminal through this.
   const resolver = createPaneResolver(() => bridge.paneInventory());
   /** Best effort, after delivery: one bounded `worktree ps` read; failures are ignored. */
@@ -452,6 +461,11 @@ export async function startBridgeService(options: BridgeServiceOptions) {
     answerTool(bridge, { settingsPath: options.settingsPath }),
     // Always listed; each refused unless its own setting (作成・終了・削除) is on.
     ...workspaceToolDefinitions(bridge, { settingsPath: options.settingsPath }),
+    startTaskTool(bridge, {
+      settingsPath: options.settingsPath,
+      templatesPath: options.templatesPath ?? join(dirname(options.settingsPath), "templates.json"),
+    }),
+    auditLogTool(audit),
     // Local labels only (no Orca effect), so not gated by a setting.
     ...aliasToolDefinitions(bridge),
     ...settingsToolDefinitions(options.settingsPath),
@@ -463,7 +477,7 @@ export async function startBridgeService(options: BridgeServiceOptions) {
     call: async (owner, name, args, meta) => {
       const def = name === recentToolName ? recentTool(owner) : byName.get(name);
       if (!def) throw new EventError("method_not_found");
-      return callTool(def, args, meta);
+      return callTool(def, args, meta, { audit, source: "chatgpt" });
     },
   };
   const fetch = createSessionMcpHttpEntry({ dispatch }, auth.resolve, diagnostic, tools);

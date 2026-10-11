@@ -175,6 +175,20 @@
     </section>
 
     <section>
+      <div class="row">
+        <h2>操作の記録</h2>
+        <button id="reloadAudit" type="button">再読み込み</button>
+      </div>
+      <p class="muted small">
+        dot（ChatGPT）や stdio の MCP クライアントが bridge
+        に頼んだ書き込み操作（指示の送信・回答・作成・終了・削除・呼び名・設定の変更）の新しい 30
+        件です。送った文面は先頭 200 文字だけを記録しています。
+      </p>
+      <table id="audit" class="audit"></table>
+      <p id="auditEmpty" class="muted small" hidden>まだ記録はありません。</p>
+    </section>
+
+    <section>
       <h2>操作</h2>
       <div class="row">
         <button id="restart" type="button">Tunnel を再起動</button>

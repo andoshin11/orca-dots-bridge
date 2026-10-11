@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vite-plus/test";
 import {
+  auditViewLimit,
+  formatAuditEntry,
   needsAgentRefresh,
   nodeCandidates,
   overallLevel,
+  parseAuditLog,
   parseSetupRequest,
   runtimeKeyFromClipboard,
   trayTitle,
@@ -87,5 +90,88 @@ describe("menu bar app helpers", () => {
 
   test("Node candidates are absolute paths under the home or the usual prefixes", () => {
     for (const path of nodeCandidates("/Users/a")) expect(path.startsWith("/")).toBe(true);
+  });
+});
+
+describe("操作の記録", () => {
+  const line = (over: Record<string, unknown>) =>
+    JSON.stringify({
+      time: "2026-10-11T09:30:00.000Z",
+      source: "chatgpt",
+      tool: "orca_send_instruction",
+      outcome: "ok",
+      ...over,
+    });
+
+  test("keeps only well-formed entries of known tools, newest first, bounded", () => {
+    const older = [line({ summary: "old" }), "garbage"].join("\n");
+    const current = [
+      line({ tool: "rm_everything" }),
+      line({ outcome: "maybe" }),
+      line({ source: "web" }),
+      line({ summary: "new", target: { handle: "term_1", "bad key": "x", nested: { a: 1 } } }),
+      "",
+    ].join("\n");
+    const entries = parseAuditLog([older, current]);
+    expect(entries.map((e) => e.summary)).toEqual(["new", "old"]);
+    expect(entries[0]!.target).toEqual({ handle: "term_1" });
+    const many = Array.from({ length: 40 }, (_, i) => line({ summary: String(i) })).join("\n");
+    const limited = parseAuditLog([many]);
+    expect(limited).toHaveLength(auditViewLimit);
+    expect(limited[0]!.summary).toBe("39");
+    expect(parseAuditLog([undefined, ""])).toEqual([]);
+  });
+
+  test("strips control characters and clips the summary", () => {
+    const [entry] = parseAuditLog([line({ summary: `a\u001b[31mb${"x".repeat(400)}` })]);
+    expect(entry!.summary).not.toContain("\u001b");
+    expect(Array.from(entry!.summary!)).toHaveLength(200);
+  });
+
+  test("formats rows in Japanese wording", () => {
+    const [send, task, settings, close] = parseAuditLog([
+      [
+        line({
+          tool: "orca_close_agent",
+          outcome: "refused",
+          errorCode: "close_disabled",
+          target: { worktreeId: "repo::/w/x", allInWorkspace: true },
+        }),
+        line({ tool: "orca_settings_update", target: { sendEnabled: true, removeEnabled: false } }),
+        line({
+          tool: "orca_start_task",
+          source: "stdio",
+          outcome: "error",
+          errorCode: "create_outcome_unknown",
+          target: { repo: "r", template: "issue", issue: 12, workspace: "issue-12" },
+        }),
+        line({ target: { handle: "term_1", worktreeId: "w" }, summary: "テストを直して" }),
+      ].join("\n"),
+    ]);
+    expect(formatAuditEntry(send!)).toMatchObject({
+      tool: "指示の送信",
+      target: "term_1",
+      outcome: "完了",
+      outcomeClass: "ok",
+      source: "ChatGPT",
+      summary: "テストを直して",
+    });
+    expect(formatAuditEntry(task!)).toMatchObject({
+      tool: "タスクの開始",
+      target: "r / issue-12 / 型 issue / Issue #12",
+      outcome: "エラー（create_outcome_unknown）",
+      source: "stdio",
+    });
+    expect(formatAuditEntry(settings!)).toMatchObject({
+      tool: "設定の変更",
+      target: "指示の送信: オン、ワークスペースの削除: オフ",
+      summary: "",
+    });
+    expect(formatAuditEntry(close!)).toMatchObject({
+      tool: "エージェントの終了",
+      target: "すべてのターミナル",
+      outcome: "拒否（close_disabled）",
+    });
+    expect(formatAuditEntry(send!).time).toMatch(/\d/);
   });
 });

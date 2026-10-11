@@ -95,6 +95,141 @@ export function parseSetupRequest(input) {
 
 export const externalPages = ["tunnels", "apiKeys", "connectors"];
 
+// ---- 操作の記録 (the bridge's audit.log) ----------------------------------
+// The main process reads ~/.orca-dots-bridge/audit.log(.1); these helpers turn its JSON
+// Lines into rows for the window. Only known fields of known shapes are kept.
+
+export const auditViewLimit = 30;
+export const auditToolLabels = {
+  orca_send_instruction: "指示の送信",
+  orca_answer: "質問・承認への回答",
+  orca_create_workspace: "ワークスペースの作成",
+  orca_start_task: "タスクの開始",
+  orca_close_agent: "エージェントの終了",
+  orca_remove_workspace: "ワークスペースの削除",
+  orca_set_alias: "呼び名の登録",
+  orca_remove_alias: "呼び名の削除",
+  orca_settings_update: "設定の変更",
+};
+export const auditOutcomeLabels = { ok: "完了", refused: "拒否", error: "エラー" };
+const auditSources = new Set(["chatgpt", "stdio"]);
+const auditTargetOrder = [
+  ["repo", ""],
+  ["workspace", ""],
+  ["alias", "呼び名 "],
+  ["template", "型 "],
+  ["issue", "Issue #"],
+  ["pr", "PR #"],
+  ["agent", ""],
+  ["option", "選択肢 "],
+  ["handle", ""],
+];
+const settingLabels = {
+  sendEnabled: "指示の送信",
+  closeEnabled: "エージェントの終了",
+  createEnabled: "ワークスペースの作成",
+  removeEnabled: "ワークスペースの削除",
+  notificationsEnabled: "通知",
+};
+
+/** Printable text only (control characters become spaces), at most `max` characters. */
+const shortText = (value, max) =>
+  typeof value === "string"
+    ? Array.from(value)
+        .map((c) => (c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127 ? " " : c))
+        .slice(0, max)
+        .join("")
+    : undefined;
+
+/** One validated entry from one line, or undefined. */
+function auditEntry(line) {
+  let raw;
+  try {
+    raw = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return undefined;
+  if (!Object.hasOwn(auditToolLabels, raw.tool) || !Object.hasOwn(auditOutcomeLabels, raw.outcome))
+    return undefined;
+  if (!auditSources.has(raw.source) || typeof raw.time !== "string") return undefined;
+  const target = {};
+  if (typeof raw.target === "object" && raw.target !== null && !Array.isArray(raw.target))
+    for (const [key, value] of Object.entries(raw.target).slice(0, 30)) {
+      if (!/^[A-Za-z]{1,40}$/.test(key)) continue;
+      if (typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)))
+        target[key] = value;
+      else if (typeof value === "string") target[key] = shortText(value, 300);
+    }
+  return {
+    time: shortText(raw.time, 40),
+    source: raw.source,
+    tool: raw.tool,
+    outcome: raw.outcome,
+    errorCode:
+      typeof raw.errorCode === "string" && /^[a-z_]{1,80}$/.test(raw.errorCode)
+        ? raw.errorCode
+        : undefined,
+    target,
+    summary: shortText(raw.summary, 200),
+  };
+}
+
+/**
+ * The newest `limit` entries, newest first, from the files' texts in order (older file
+ * first). Malformed lines are skipped.
+ */
+export function parseAuditLog(texts, limit = auditViewLimit) {
+  const entries = [];
+  for (const text of texts)
+    if (typeof text === "string")
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        const entry = auditEntry(line);
+        if (entry) entries.push(entry);
+      }
+  return entries.slice(-limit).reverse();
+}
+
+/** What one row of 操作の記録 shows; all strings, set with textContent. */
+export function formatAuditEntry(entry, locale = "ja-JP") {
+  const date = new Date(entry.time);
+  const time = Number.isNaN(date.getTime())
+    ? entry.time
+    : date.toLocaleString(locale, {
+        month: "numeric",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+  const t = entry.target ?? {};
+  let target;
+  if (entry.tool === "orca_settings_update")
+    target = Object.entries(t)
+      .filter(([, v]) => typeof v === "boolean")
+      .map(([k, v]) => `${settingLabels[k] ?? k}: ${v ? "オン" : "オフ"}`)
+      .join("、");
+  else {
+    const parts = auditTargetOrder
+      .filter(([key]) => t[key] !== undefined && t[key] !== "")
+      .map(([key, prefix]) => `${prefix}${t[key]}`);
+    if (t.allInWorkspace === true) parts.push("すべてのターミナル");
+    if (!parts.length && typeof t.worktreeId === "string") parts.push(t.worktreeId);
+    target = parts.join(" / ");
+  }
+  const outcome = auditOutcomeLabels[entry.outcome];
+  return {
+    time,
+    tool: auditToolLabels[entry.tool],
+    source: entry.source === "stdio" ? "stdio" : "ChatGPT",
+    target,
+    outcome: entry.errorCode ? `${outcome}（${entry.errorCode}）` : outcome,
+    outcomeClass: entry.outcome,
+    summary: entry.tool === "orca_settings_update" ? "" : (entry.summary ?? ""),
+  };
+}
+
 // ---- In-app updates -------------------------------------------------------
 // The app is signed ad hoc only, so Squirrel / electron-updater cannot be used.
 // Authenticity rests on the GitHub release itself: the release JSON and assets come

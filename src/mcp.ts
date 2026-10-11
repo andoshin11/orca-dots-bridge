@@ -2,10 +2,13 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { Bridge, pageShape, detailSchema, logsSchema, inspectSchema } from "./service.js";
+import { auditLogPath, createAuditLog } from "./audit.js";
 import { chatgptSettingsPath, settingsCapability } from "./chatgpt-settings.js";
+import { templatesPath } from "./templates.js";
 import {
   aliasToolDefinitions,
   answerTool,
+  auditLogTool,
   briefTool,
   callTool,
   defineTool,
@@ -14,6 +17,7 @@ import {
   readOnlyAnnotations,
   sendTool,
   settingsToolDefinitions,
+  startTaskTool,
   statusTool,
   textResult,
   workspaceToolDefinitions,
@@ -39,6 +43,8 @@ const sendEnabled = !statusOnly && process.env.ORCA_BRIDGE_ENABLE_SEND === "1";
 // Creating, closing and removing workspaces: a separate explicit opt-in, full toolset only.
 const workspaceEnabled =
   !statusOnly && toolset === "full" && process.env.ORCA_BRIDGE_ENABLE_WORKSPACE === "1";
+// Every write call is recorded in ~/.orca-dots-bridge/audit.log (see audit.ts).
+const audit = createAuditLog(auditLogPath());
 const register = (def: ToolDefinition) =>
   server.registerTool(
     def.name,
@@ -49,7 +55,8 @@ const register = (def: ToolDefinition) =>
       ...(def.outputShape ? { outputSchema: def.outputShape } : {}),
       annotations: def.annotations,
     },
-    (args: unknown, extra: { _meta?: Record<string, unknown> }) => callTool(def, args, extra._meta),
+    (args: unknown, extra: { _meta?: Record<string, unknown> }) =>
+      callTool(def, args, extra._meta, { audit, source: "stdio" }),
   );
 const readTool = (
   name: string,
@@ -70,6 +77,7 @@ if (!statusOnly) {
   register(findTool(bridge));
   register(briefTool(bridge));
   register(pendingInputTool(bridge));
+  register(auditLogTool(audit));
 }
 if (!statusOnly && toolset === "full") {
   register(
@@ -128,12 +136,11 @@ if (toolset === "full" && (sendEnabled || workspaceEnabled))
 // Answering a pending question sends input, so it shares the send opt-in.
 if (sendEnabled)
   register(answerTool(bridge, chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {}));
-if (workspaceEnabled)
-  for (const def of workspaceToolDefinitions(
-    bridge,
-    chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {},
-  ))
-    register(def);
+if (workspaceEnabled) {
+  const gate = chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {};
+  for (const def of workspaceToolDefinitions(bridge, gate)) register(def);
+  register(startTaskTool(bridge, { ...gate, templatesPath: templatesPath() }));
+}
 if (chatgptSettings)
   for (const def of settingsToolDefinitions(chatgptSettingsPath())) register(def);
 await server.connect(new StdioServerTransport());
