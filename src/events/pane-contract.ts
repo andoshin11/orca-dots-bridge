@@ -21,6 +21,19 @@ export const paneTargetSchema = z
   })
   .strict();
 export type PaneTarget = z.infer<typeof paneTargetSchema>;
+/**
+ * Pane-scoped event names. `orca.pane_activity` carries every kind; the other two carry
+ * one kind each (plus monitoring interruptions), so a subscriber that only sees the event
+ * name still knows what happened.
+ */
+export const paneEventNames = [
+  "orca.pane_activity",
+  "orca.pane_turn_finished",
+  "orca.pane_input_required",
+] as const;
+export type PaneEventName = (typeof paneEventNames)[number];
+export const isPaneEventName = (name: string): name is PaneEventName =>
+  (paneEventNames as readonly string[]).includes(name);
 export function samePaneTarget(a: PaneTarget, b: PaneTarget): boolean {
   return (
     a.executionHostId === b.executionHostId &&

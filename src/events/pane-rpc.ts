@@ -4,8 +4,10 @@ import { z } from "zod";
 import { EventEngine, subscribeSchema, unsubscribeSchema } from "./engine.js";
 import { digest } from "./model.js";
 import {
+  isPaneEventName,
   paneTargetSchema,
   samePaneTarget,
+  type PaneEventName,
   type PaneDescriber,
   type PaneTarget,
   type RelayStatus,
@@ -147,7 +149,7 @@ export class PaneEventsRpc {
     if (this.deferMonitoring && !this.activating && (this.deferred || this.trialIdentity))
       throw new EventError("subscription_limit");
     const p = subscribeSchema.parse(params);
-    if (p.name !== "orca.pane_activity") throw new EventError("invalid_params");
+    if (!isPaneEventName(p.name)) throw new EventError("invalid_params");
     const target = paneTargetSchema.parse(p.arguments);
     const ttlMs = Math.min(p.ttlMs ?? this.maxTtlMs, this.maxTtlMs, this.expiresAt - this.now());
     if (ttlMs < 2000) throw new EventError("invalid_params");
@@ -189,7 +191,7 @@ export class PaneEventsRpc {
     }
     try {
       this.diagnostic?.("monitoring_start_attempted");
-      const stream = await this.startStream(owner, result.id, target);
+      const stream = await this.startStream(owner, result.id, target, p.name);
       if (this.closed || this.now() >= this.expiresAt) {
         await stream.stop();
         throw new EventError("runtime_unavailable");
@@ -205,7 +207,12 @@ export class PaneEventsRpc {
       throw error;
     }
   }
-  private async startStream(owner: string, subscriptionId: string, target: PaneTarget) {
+  private async startStream(
+    owner: string,
+    subscriptionId: string,
+    target: PaneTarget,
+    name: PaneEventName,
+  ) {
     // The pane must still be the one the caller approved before any event is accepted.
     let current: PaneTarget;
     try {
@@ -256,7 +263,7 @@ export class PaneEventsRpc {
         | { kind: "monitoring_interrupted"; reason: string },
     ) => ({
       eventId,
-      name: "orca.pane_activity",
+      name,
       timestamp: new Date(timestamp).toISOString(),
       cursor: null,
       data: {
@@ -294,7 +301,8 @@ export class PaneEventsRpc {
           : status.kind === "waiting" || status.kind === "blocked"
             ? ({ kind: "input_required" } as const)
             : undefined;
-      if (!data) return;
+      // A single-kind subscription only hears its own kind.
+      if (!data || (name !== "orca.pane_activity" && name !== `orca.pane_${data.kind}`)) return;
       const eventId = digest([
         subscriptionId,
         status.paneKey,
@@ -350,7 +358,7 @@ export class PaneEventsRpc {
       for (const s of await this.engine.listSubscriptions()) {
         if (this.closed) break;
         const target = paneTargetSchema.safeParse(s.target);
-        if (s.name !== "orca.pane_activity" || !target.success) continue;
+        if (!isPaneEventName(s.name) || !target.success) continue;
         const key = this.identity(s.owner, {
           name: s.name,
           arguments: s.target,
@@ -358,7 +366,7 @@ export class PaneEventsRpc {
         });
         if (this.streams.has(key)) continue;
         try {
-          this.streams.set(key, await this.startStream(s.owner, s.id, target.data));
+          this.streams.set(key, await this.startStream(s.owner, s.id, target.data, s.name));
           resumed++;
         } catch (error) {
           // A pane that now holds something else is gone for good. If Orca is just

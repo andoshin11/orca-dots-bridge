@@ -13,7 +13,11 @@ const relayKey = Buffer.alloc(32, 2);
 const keys = {
   read: async (account: KeyAccount) =>
     Buffer.from(
-      { "outbox-v1": Buffer.alloc(32, 3), "service-v1": serviceKey, "relay-v1": relayKey }[account],
+      {
+        "outbox-v1": Buffer.alloc(32, 3),
+        "service-v1": serviceKey,
+        "relay-v1": relayKey,
+      }[account],
     ),
 };
 const target: PaneTarget = {
@@ -121,9 +125,12 @@ async function fixture(options: { enabled: boolean; describe?: () => Promise<Pan
       body,
     });
   };
-  const subscribe = (args: unknown = { terminalHandle: "term_1", worktreeId: "wt_1" }) =>
+  const subscribe = (
+    args: unknown = { terminalHandle: "term_1", worktreeId: "wt_1" },
+    name = "orca.pane_turn_finished",
+  ) =>
     mcp("events/subscribe", {
-      name: "orca.pane_activity",
+      name,
       arguments: args,
       delivery: { mode: "webhook", url: callback, secret },
       ttlMs: null,
@@ -135,12 +142,46 @@ async function fixture(options: { enabled: boolean; describe?: () => Promise<Pan
   return { dir, settingsPath, posts, start, mcp, relay, subscribe, until };
 }
 
-it("lists the pane event with the handle + worktree ID arguments dot can supply", async () => {
+it("lists one event per kind with the handle + worktree ID arguments dot can supply", async () => {
   const f = await fixture({ enabled: true });
   await f.start();
   const listed = await f.mcp("events/list");
   expect(listed.result.events).toEqual(serviceCatalog);
-  expect(listed.result.events[0].inputSchema.required).toEqual(["terminalHandle", "worktreeId"]);
+  expect(listed.result.events.map((e: any) => e.name)).toEqual([
+    "orca.pane_turn_finished",
+    "orca.pane_input_required",
+  ]);
+  for (const e of listed.result.events)
+    expect(e.inputSchema.required).toEqual(["terminalHandle", "worktreeId"]);
+});
+
+it("names each delivery after its kind and sends a subscription only its own kind", async () => {
+  const f = await fixture({ enabled: true });
+  await f.start();
+  await f.subscribe(undefined, "orca.pane_turn_finished");
+  await f.subscribe(undefined, "orca.pane_input_required");
+  await f.relay("waiting");
+  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_input_required"));
+  await f.relay("done");
+  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_turn_finished"));
+  await new Promise((r) => setTimeout(r, 100));
+  const events = f.posts.filter((p) => p.body.type !== "verification");
+  expect(events.map((p) => [p.body.name, p.body.data.kind])).toEqual([
+    ["orca.pane_input_required", "input_required"],
+    ["orca.pane_turn_finished", "turn_finished"],
+  ]);
+});
+
+it("keeps delivering to an earlier orca.pane_activity subscription", async () => {
+  const f = await fixture({ enabled: true });
+  await f.start();
+  await f.subscribe(undefined, "orca.pane_activity");
+  await f.relay("waiting");
+  await f.until(() =>
+    f.posts.some(
+      (p) => p.body.name === "orca.pane_activity" && p.body.data.kind === "input_required",
+    ),
+  );
 });
 
 it("refuses subscriptions while 通知を受け取る is off", async () => {
@@ -159,7 +200,7 @@ it("verifies the callback, delivers pane events, and keeps the subscription acro
   expect(f.posts[0]?.body.type).toBe("verification");
 
   expect((await f.relay("done")).status).toBe(204);
-  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_activity"));
+  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_turn_finished"));
   expect(f.posts.at(-1)?.body.data).toMatchObject({
     kind: "turn_finished",
     assurance: "pane_only",
@@ -169,8 +210,8 @@ it("verifies the callback, delivers pane events, and keeps the subscription acro
   running.splice(running.indexOf(first), 1);
   await f.start();
   const before = f.posts.length;
-  expect((await f.relay("waiting")).status).toBe(204);
-  await f.until(() => f.posts.slice(before).some((p) => p.body.data?.kind === "input_required"));
+  expect((await f.relay("done")).status).toBe(204);
+  await f.until(() => f.posts.slice(before).some((p) => p.body.name === "orca.pane_turn_finished"));
   const counts = JSON.parse(await readFile(join(f.dir, "notifications", "counts.json"), "utf8"));
   expect(counts.counts.subscriptions_resumed).toBe(1);
 });
@@ -199,7 +240,7 @@ it("keeps subscriptions while Orca is unreachable at start and resumes them late
   expect((await counts()).subscriptions_resumed).toBe(1);
   const before = f.posts.length;
   await f.relay("done");
-  await f.until(() => f.posts.slice(before).some((p) => p.body.name === "orca.pane_activity"));
+  await f.until(() => f.posts.slice(before).some((p) => p.body.name === "orca.pane_turn_finished"));
 });
 
 it("drops a persisted subscription whose pane now holds something else", async () => {
@@ -237,9 +278,13 @@ it("rejects a callback outside the allowed hosts and records only its host name"
   const f = await fixture({ enabled: true });
   await f.start();
   const reply = await f.mcp("events/subscribe", {
-    name: "orca.pane_activity",
+    name: "orca.pane_turn_finished",
     arguments: { terminalHandle: "term_1", worktreeId: "wt_1" },
-    delivery: { mode: "webhook", url: "https://hooks.example.com/secret-path?token=x", secret },
+    delivery: {
+      mode: "webhook",
+      url: "https://hooks.example.com/secret-path?token=x",
+      secret,
+    },
   });
   expect(reply.error).toBeDefined();
   expect(await readFile(join(f.dir, "notifications", "rejected-callback-host"), "utf8")).toBe(
@@ -260,7 +305,7 @@ it("unsubscribes with the short arguments even after the pane is gone", async ()
   await f.subscribe();
   alive = false;
   const reply = await f.mcp("events/unsubscribe", {
-    name: "orca.pane_activity",
+    name: "orca.pane_turn_finished",
     arguments: { terminalHandle: "term_1", worktreeId: "wt_1" },
     delivery: { mode: "webhook", url: callback },
   });
@@ -275,7 +320,10 @@ it("unsubscribes with the short arguments even after the pane is gone", async ()
 it("rejects a handle whose pane now belongs to another worktree", async () => {
   const f = await fixture({ enabled: true });
   await f.start();
-  const reply = await f.subscribe({ terminalHandle: "term_1", worktreeId: "wt_other" });
+  const reply = await f.subscribe({
+    terminalHandle: "term_1",
+    worktreeId: "wt_other",
+  });
   expect(reply.error).toBeDefined();
   expect(f.posts).toHaveLength(0);
 });
