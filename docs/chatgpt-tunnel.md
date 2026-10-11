@@ -50,7 +50,7 @@ stdio 対応MCPクライアントの一般的な設定例（未登録）:
 
 Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_status`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り6つです。送信ツールは下記の明示有効化が必要です。
 
-公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](../examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。クラウド側への接続には、下記のSecure MCP Tunnel経路を利用できます。既定のstdio入口はHTTPポートを開きません。通知試験専用入口だけが、明示起動時にloopback HTTPポートを開きます。Tunnel・キー・ChatGPTプラグインの設定は利用者が個別に行います。
+公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](../examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。クラウド側への接続には、下記のSecure MCP Tunnel経路を利用できます。既定のstdio入口はHTTPポートを開きません。loopback HTTPポートを開くのは、自動通知の通知サービスだけです。Tunnel・キー・ChatGPTプラグインの設定は利用者が個別に行います。
 
 音声アシスタント向けの運用例:
 
@@ -63,7 +63,7 @@ Node と Orca は実際の絶対パスに置き換えてください。MCPの st
 
 通常は[メニューバーアプリ](menu-bar-app.md)か、上の「setup コマンド」を使ってください。この節は、Tunnelを手作業で作る場合の手順と、その背景です。`setup`もこの節と同じく環境変数を空にした子プロセスと`file:`によるキー参照を使い、加えてLaunchAgentによる常駐を設定できます。ただし`setup`はstatus-onlyではなく、statusと単一送信を公開し、送信の可否をChatGPTの設定で切り替えます（下の「ChatGPTのプラグイン設定で送信を許可する」）。
 
-状態確認には Tunnel を使わない構成（dot のローカルタスク経由）もあります。自動通知には、ここで説明するものとは別の通知用 Tunnel が必要です。どちらも[通知用Tunnelの設定](notification-tunnel.md)の「Tunnel は必要か」で比べています。
+状態確認には Tunnel を使わない構成（dot のローカルタスク経由）もあります。自動通知には、ここで説明するものとは別の通知用 Tunnel が必要です。通知用 Tunnel が必要な理由は[自動通知](notifications.md)の「通知用 Tunnel と認証」を参照してください。
 
 サーバー起動時に `ORCA_BRIDGE_STATUS_ONLY=1` を設定すると、公開ツールは `orca_status` の1件だけになります。`ORCA_BRIDGE_ENABLE_SEND=1` が同時に存在しても、送信を含む他のツールは登録されず、呼び出しも拒否します。これはMCPの公開範囲の制限であり、CLIの機能やOrca自体の権限は変更しません。statusは状態に加えて上限付きの進捗ログを返す場合があります。
 

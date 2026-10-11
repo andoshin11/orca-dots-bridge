@@ -1,13 +1,10 @@
 import { expect, test } from "vite-plus/test";
 import { EventEngine, type EngineOptions } from "../src/events/engine.js";
-import { createOwnerResolver } from "../src/events/auth.js";
-import { eventRpc } from "../src/events/rpc.js";
 import { projectObservation, type Target } from "../src/events/model.js";
 import {
   callbackUrl,
   createPost,
   equalChallenge,
-  EventError,
   headersFor,
   pinCallback,
   publicIPv4,
@@ -350,79 +347,19 @@ test("failed persistence never permits delivery from unsaved queue state", async
   await expect(f.engine.deliver()).rejects.toThrow("state_unavailable");
   expect(f.sent).toHaveLength(1);
 });
-test("RPC takes owner only from verified transport auth; wrong audience, expiration and spoofed params fail", async () => {
+test("unsubscribe by original identity is idempotent and cannot remove another owner", async () => {
   const f = await fixture();
-  let valid = true;
-  const resolve = createOwnerResolver(
-    "https://issuer.example.com",
-    "orca-events",
-    async (token) =>
-      token === "synthetic" && valid
-        ? {
-            issuer: "https://issuer.example.com",
-            subject: "fixture",
-            audience: ["orca-events"],
-            expiresAt: epoch + 1000,
-            scopes: ["orca:events"],
-          }
-        : null,
-    () => epoch,
-  );
-  const rpc = eventRpc(f.engine, resolve);
-  await expect(rpc("events/list", {}, undefined)).rejects.toMatchObject({ code: -32000 });
-  expect(await rpc("events/list", {}, "Bearer synthetic")).toHaveProperty("events");
-  await expect(
-    rpc("events/subscribe", { ...input(), owner: "spoofed" }, "Bearer synthetic"),
-  ).rejects.toMatchObject({ code: -32602 });
-  await rpc("events/subscribe", input(), "Bearer synthetic");
-  valid = false;
-  await expect(rpc("events/list", {}, "Bearer synthetic")).rejects.toMatchObject({ code: -32000 });
-  for (const patch of [
-    { issuer: "other" },
-    { audience: ["other"] },
-    { expiresAt: epoch },
-    { scopes: [] },
-  ]) {
-    const check = createOwnerResolver(
-      "issuer",
-      "audience",
-      async () => ({
-        issuer: "issuer",
-        subject: "fixture",
-        audience: ["audience"],
-        expiresAt: epoch + 1000,
-        scopes: ["orca:events"],
-        ...patch,
-      }),
-      () => epoch,
-    );
-    await expect(check("Bearer synthetic")).rejects.toThrow("unauthorized");
-  }
-  f.setReply(() => {
-    throw new EventError("synthetic_private_detail");
-  });
-  await expect(
-    eventRpc(f.engine, async () => "owner")("events/subscribe", input(), "Bearer synthetic"),
-  ).rejects.toMatchObject({ code: -32015, data: { reason: "challenge_failed" } });
-});
-
-test("protocol unsubscribe uses original identity, is idempotent and cannot remove another owner", async () => {
-  const f = await fixture();
-  const rpc = eventRpc(f.engine, async (auth) => {
-    if (!auth) throw new EventError("unauthorized");
-    return auth;
-  });
-  await rpc("events/subscribe", input(), "owner");
+  await f.engine.subscribe("owner", input());
   await f.engine.ingest(observation());
   const stop = {
     name: "orca.turn_finished",
     arguments: target,
     delivery: { mode: "webhook", url: "https://receiver.example.com/events" },
   };
-  expect(await rpc("events/unsubscribe", stop, "other")).toEqual({});
+  expect(await f.engine.unsubscribeMatching("other", stop)).toEqual({});
   expect(await f.engine.deliver()).toMatchObject({ accepted: 1 });
-  expect(await rpc("events/unsubscribe", stop, "owner")).toEqual({});
-  expect(await rpc("events/unsubscribe", stop, "owner")).toEqual({});
+  expect(await f.engine.unsubscribeMatching("owner", stop)).toEqual({});
+  expect(await f.engine.unsubscribeMatching("owner", stop)).toEqual({});
   expect(await f.engine.ingest(observation({ transitionId: "after_stop" }))).toMatchObject({
     queued: 0,
   });

@@ -6,9 +6,8 @@ import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Duplex } from "node:stream";
 import type { IncomingMessage } from "node:http";
-import { createNodePinnedSend, createPost } from "../src/events/webhook.js";
-import { createTwoPhaseEndpoint } from "../src/events/two-phase-endpoint.js";
-import { digest } from "../src/events/model.js";
+import { createNodePinnedSend, createPost, EventError } from "../src/events/webhook.js";
+import { EventEngine } from "../src/events/engine.js";
 import { verifyStandardWebhook } from "./fixtures/standard-webhook-receiver.js";
 import type { TLSSocket } from "node:tls";
 let dir: string, cert: Buffer, key: Buffer;
@@ -146,44 +145,28 @@ async function fixture(mode: string) {
       cb,
     );
   }) as typeof request;
-  const stages: string[] = [],
-    open = vi.fn();
-  const expiresAt = Date.now() + 30000;
-  const endpoint = await createTwoPhaseEndpoint({
-    target,
-    serviceKey: Buffer.alloc(32, 3),
-    scope: {
-      host: "receiver.example.com",
-      owner: "service:trial-service-v1",
-      targetHash: digest(target),
-      expiresAt,
-      domainConfirmation: "送信先ドメインを確認 receiver.example.com",
-      confirmation: "確認通信1回のみを承認 receiver.example.com",
-      accountBasis: "bounded_protocol_test",
-    },
+  const stages: string[] = [];
+  const engine = await EventEngine.open({
+    key: Buffer.alloc(32, 4),
+    store: { load: async () => null, save: async () => {} },
+    authorize: async () => true,
+    allowedCallbackHosts: ["receiver.example.com"],
     diagnostic: (s) => stages.push(s),
-    review: vi.fn(),
-    transport: { describe: async () => target, open },
-    engine: {
-      key: Buffer.alloc(32, 4),
-      store: { load: async () => null, save: async () => {} },
-      post: createPost(
-        ["receiver.example.com"],
-        async () => ["8.8.8.8"],
-        (pinned, headers, body, signal) => {
-          expect(pinned.address).toBe("8.8.8.8");
-          // Redirect the validated synthetic IP only; preserve production lookup callback.
-          return createNodePinnedSend(local)(
-            { ...pinned, address: "127.0.0.1" },
-            headers,
-            body,
-            signal,
-          );
-        },
-      ),
-    },
+    post: createPost(
+      ["receiver.example.com"],
+      async () => ["8.8.8.8"],
+      (pinned, headers, body, signal) => {
+        expect(pinned.address).toBe("8.8.8.8");
+        // Redirect the validated synthetic IP only; preserve production lookup callback.
+        return createNodePinnedSend(local)(
+          { ...pinned, address: "127.0.0.1" },
+          headers,
+          body,
+          signal,
+        );
+      },
+    ),
   });
-  closers.push(endpoint.close);
   const params = {
     name: "orca.session_activity",
     arguments: target,
@@ -192,32 +175,18 @@ async function fixture(mode: string) {
       url: "https://receiver.example.com/PRIVATE_POISON",
       secret: "whsec_" + Buffer.alloc(32, 7).toString("base64"),
     },
-    _meta: {
-      "io.modelcontextprotocol/protocolVersion": "2026-07-28",
-      "io.modelcontextprotocol/clientCapabilities": {},
-    },
   };
-  const subscribe = async () => {
-    const response = await endpoint.fetch(
-      new Request("http://127.0.0.1/mcp", {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          accept: "application/json, text/event-stream",
-          "MCP-Protocol-Version": "2026-07-28",
-          "Mcp-Method": "events/subscribe",
-          authorization: "Bearer " + Buffer.alloc(32, 3).toString("base64url"),
-        },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "events/subscribe", params }),
-      }),
-    );
-    return response.json() as Promise<{
-      result?: { id: string };
-      error?: { code: number; data?: { reason: string } };
-    }>;
+  const subscribe = async (): Promise<{ id?: string; error?: EventError }> => {
+    try {
+      return { id: (await engine.subscribe("owner", params)).id };
+    } catch (error) {
+      if (!(error instanceof EventError)) throw error;
+      return { error };
+    }
   };
-  return { subscribe, stages, open, received: () => received };
+  return { subscribe, stages, received: () => received };
 }
+
 it("keeps the pinned direct TLS route despite ambient proxy variables", async () => {
   for (const name of [
     "HTTP_PROXY",
@@ -230,7 +199,7 @@ it("keeps the pinned direct TLS route despite ambient proxy variables", async ()
     vi.stubEnv(name, "http://127.0.0.1:9");
   vi.stubEnv("NODE_USE_ENV_PROXY", "1");
   const f = await fixture("normal");
-  expect((await f.subscribe()).result?.id).toMatch(/^sub_/);
+  expect((await f.subscribe()).id).toMatch(/^sub_/);
   expect(f.received()).toBe(1);
 });
 it.each([
@@ -251,23 +220,22 @@ it.each([
   ["echo", "challenge_echo_mismatch"],
   ["hang", "callback_timeout"],
 ])(
-  "real loopback TLS + MCP classifies %s and never starts monitoring",
+  "real loopback TLS classifies %s during the verification challenge",
   async (mode, stage) => {
     const f = await fixture(mode);
     const result = await f.subscribe();
-    expect(f.stages).toContain(stage);
-    expect(f.open).not.toHaveBeenCalled();
+    const observed = [...f.stages, result.error?.reason];
+    expect(observed).toContain(stage);
     expect(JSON.stringify(f.stages)).not.toContain("PRIVATE_POISON");
     expect(JSON.stringify(result)).not.toContain("PRIVATE_POISON");
-    if (mode === "normal") expect(result.result?.id).toMatch(/^sub_/);
+    // TLS trust/hostname failures abort the handshake before any request reaches the receiver.
+    expect(f.received()).toBe(mode === "untrusted" || mode === "hostname" ? 0 : 1);
+    if (mode === "normal") expect(result.id).toMatch(/^sub_/);
     else {
-      expect(result.error?.code).toBe(-32015);
-      expect(result.error?.data?.reason).toBe(mode === "hang" ? "timeout" : "challenge_failed");
+      expect(result.error?.code).toBe("callback_verification_failed");
+      expect(f.stages).toContain("challenge_failed");
       expect(f.stages).not.toContain("subscription_created");
     }
-    const before = f.received();
-    await f.subscribe();
-    expect(f.received()).toBe(before);
   },
   20000,
 );

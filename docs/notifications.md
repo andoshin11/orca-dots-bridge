@@ -14,7 +14,12 @@ Orca ── relay plugin ──▶ 通知サービス（この Mac、常駐）�
 
 ## 準備（初回だけ）
 
-1. **Orca に relay plugin を入れます。** 手順は[relay plugin による通知](relay-notifications.md)の「1. relay plugin を入れる」です。plugin の設定は `setup` が作ります。
+1. **Orca に relay plugin を入れます。** Orca の Settings → Plugins → プラグインをインストール → Git URL に次を入れ、権限 `events:subscribe` を確認して承認します。plugin の設定（送信先と署名用の鍵）は、3 の `setup` が作ります。
+
+   ```text
+   https://github.com/andoshin11/orca-agent-status-relay#v0.1.0
+   ```
+
 2. **Platform で通知用の Tunnel を作ります。** 状態確認用とは別の Tunnel にし、個人の ChatGPT workspace に関連付けます。
 3. **この Mac を準備します。** メニューバーアプリでは、「通知用の Tunnel も使う」に 2 の ID を入れ、「通知サービスと通知用の Tunnel を常駐させる」をオンにして「セットアップを実行」を押します。CLI では次のとおりです。
 
@@ -56,13 +61,27 @@ dot は、依頼が本人からかを確かめるために、購読の前に確�
 
 ChatGPT が通知を送る先（callback）のホストは、既定で `connectors.api.openai.com` だけを許可しています。別のホストで購読が拒否された場合は、そのホスト名が `rejected-callback-host` に記録されます。内容を確かめたうえで、`~/.orca-dots-bridge/settings.json` の `notificationCallbackHosts`（配列）に足し、通知サービスを再起動してください（`launchctl kickstart -k gui/$(id -u)/dev.orca-dots-bridge.notifications`）。
 
+## 仕組み
+
+### 通知用 Tunnel と認証
+
+MCP Events では、dot が通知サービスに `events/subscribe` を送って購読を作ります。dot（クラウド）から Mac の `127.0.0.1:8787` に届く経路が要るので、自動通知には通知用の Tunnel が必要です（状態確認は、dot のローカルタスク経由なら Tunnel なしでも使えます）。Secure MCP Tunnel のクライアントは Mac から外へ接続するだけで、Mac でポートを開かず、インターネットに公開される URL も作りません。Cloudflare Tunnel や Tailscale Funnel、ポート開放などで購読の入口を公開する方法は、守りが Bearer だけになるので勧めません。状態確認用の Tunnel とは共有しません。
+
+通知サービスは `Authorization: Bearer <API キー>`（Keychain の `service-v1` から作るもの）を要求します。このヘッダーは Tunnel クライアントが付けます。`setup` が `~/.orca-dots-bridge/tunnel/service-authorization` に Bearer の値を書き、通知用のプロファイル（`~/.orca-dots-bridge/tunnel/profiles/orca-notifications.yaml`）の `mcp.extra_headers` から `file:` で参照します。そのため ChatGPT のプラグインは「認証なし」で接続でき、API キーは Mac から出ません。
+
+### relay plugin からの受け取り
+
+- relay の受け口（`127.0.0.1:8788/relay`）は MCP Events 用とは**別の loopback ポート**です。Tunnel が転送する MCP 用のポートからは届きません。ポートは `setup --relay-port` で変えられ、relay plugin の設定にも同じ番号が書かれます。
+- 受け口は、Standard Webhooks の署名（Keychain の `relay-v1` と、plugin の設定ファイル `~/.config/orca-agent-status-relay/config.json` に同じ鍵）と時刻（±5 分）を検証し、同じ `webhook-id` の再送を拒否します。再送の記録はプロセス内だけで、通知サービスを再起動すると消えます。
+- `done` は `turn_finished`（`outcome: "unconfirmed"`）、`waiting` と `blocked` は `input_required` として送ります。`working` は送りません。
+- イベントを受けるたびに `orca terminal show` で対象のペインを読み直します（この Mac のユーザー権限で Orca CLI を使います）。worktree・ペイン・handle・PTY 世代（`incarnationId`）のどれかが購読時と違えば `monitoring_interrupted`（`identity_changed`）を送って監視を止めます。Orca CLI から読めなければ `target_unavailable` で止めます。
+- relay plugin が同じ状態を重複して送っても、`eventId`（ペイン・状態・`mainAgent.stateStartedAt` から作る）が同じになるので、dot には 1 回だけ届きます。Orca のイベントに `mainAgent` がない場合は受信時刻で作るため、重複がそのまま届くことがあります。
+- 通知サービスがイベントを処理しきれない場合（Orca CLI の応答待ちで 16 件以上たまった、状態の保存に失敗した）は、`monitoring_interrupted`（`queue_limit` / `ingest_failed`）を送って監視を止めます。dot の webhook が受け付けず送信待ちが上限（購読ごとに 16 件）に達している場合は、停止の通知も積めずに失われます。
+- この通知サービスが対応しているのは relay plugin v0.1 です。メッセージの形が合わない場合はすべて `400` になり、`counts.json` に `relay_schema_rejected` が記録されます（relay plugin は再送しません）。何も届かないとき（`relay_arrived` が増えないとき）は、plugin の設定のポートを確かめてください。relay plugin の「Agent Status Relay: Send test event」コマンドで疎通を確かめられます。
+
 ## 制約
 
-- **ペイン単位です。** 同じペインで始まった別のエージェントのセッションは区別しません。relay plugin が止まっても気づけず、取りこぼしも検出できません（[relay plugin による通知](relay-notifications.md)）。
+- **ペイン単位です。** 同じペインで始まった別のエージェントのセッションは区別しません（PTY が作り直された場合だけ検出します）。relay plugin が止まっても気づけず、取りこぼしも検出できません。dot へのイベントには `assurance: "pane_only"` が付き、catalog の説明にもこの制約を書いています。
 - **ペインが変わると購読は終わります。** Orca を再起動して端末の handle やペインが変わった場合、その購読は止まり、ChatGPT の次の更新で失敗します。dot にもう一度頼んでください。
 - **通知の受け取り方は ChatGPT 次第です。** 通知が ChatGPT に受理されても、dot がどう表示・発話するかは保証できません。
-- **ChatGPT の Work チャットでは購読できませんでした。** 2026年10月の時点で、Work チャットに購読を頼むと「この環境には指定プラグインのイベント購読機能が公開されていない」と返されました。dot からは購読の手前（本人確認）まで進むことを確かめています。
-
-## 試験用の入口
-
-以前の、1 対象・承認から 10 分で止まる試験用の入口（`dist/notification-two-phase.mjs` など）も残しています。手順は[通知用 Tunnel の設定](notification-tunnel.md)と[relay plugin による通知](relay-notifications.md)を参照してください。常駐版の通知サービスと同時には動かせません（同じポートを使うため）。
+- **ChatGPT の Work チャットでは購読できませんでした。** 2026年10月の時点で、Work チャットに購読を頼むと「この環境には指定プラグインのイベント購読機能が公開されていない」と返されました。dot では購読でき、ターン終了と入力待ちの両方の通知が届くことを確かめています（2026-10-11）。

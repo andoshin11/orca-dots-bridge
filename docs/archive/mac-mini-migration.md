@@ -1,6 +1,6 @@
 # Mac miniへの移行手順
 
-> アーカイブ: 開発中の記録として残している文書です。現在の使い方は [README](../../README.md) を参照してください。
+> アーカイブ: 開発中の記録として残している文書です。現在の使い方は [README](../../README.md) を参照してください。ここに出てくる二段階試験の入口（`dist/notification-two-phase.mjs` など）とセッション単位の経路は、常駐版の通知サービスに置き換えて削除しました。
 
 これは未実施の移行手順です。Mac mini上の操作・起動・インストールを今回の公開作業で行ったものではありません。既存のstatus/sendと通知試験は別接続で扱います。
 
@@ -29,9 +29,9 @@ Mac mini専用の隔離profileとruntimeを準備し、当該runtimeの認証付
 
 ## 4. 二段階の試験
 
-利用者が管理するローカルプロセスで、専用32バイトキーをmacOS Keychainに準備します。実装上のservice名は`orca-dots-bridge.notifications-test`、accountは`service-v1`と`outbox-v1`です。Mac上のターミナルで`node dist/trial-key-setup.mjs`を実行すると両方を作成し、dotプラグインのAPIキーをstderrに1回だけ表示します（手順は[relay pluginによる通知](../relay-notifications.md)の「試験用の鍵を作る」を参照）。既存accountを上書きしません。キー・runtime token・callback URLをチャット、argv、Git、通常ログへ出さないでください。
+利用者が管理するローカルプロセスで、専用32バイトキーをmacOS Keychainに準備します。実装上のservice名は`orca-dots-bridge.notifications-test`、accountは`service-v1`と`outbox-v1`です。Mac上のターミナルで`node dist/trial-key-setup.mjs`を実行すると両方を作成し、dotプラグインのAPIキーをstderrに1回だけ表示します（当時の手順書`docs/relay-notifications.md`は、試験用の入口とともに削除しました）。既存accountを上書きしません。キー・runtime token・callback URLをチャット、argv、Git、通常ログへ出さないでください。
 
-`src/events/trial-runner.ts`の`twoPhaseTrialConfigSchema`と`src/events/two-phase-endpoint.ts`のscope schemaに従う設定を用意します。`dist/notification-two-phase.mjs`のstdinへ初期設定とruntime tokenを1レコードで渡し、stderrはprivate TTYに接続します。対象hashと期限を含むscopeの承認文言はschemaで検証されます。専用Tunnelから認証付きloopback endpointへ接続します（設定は[通知用Tunnelの設定](../notification-tunnel.md)）。
+`src/events/trial-runner.ts`の`twoPhaseTrialConfigSchema`と`src/events/two-phase-endpoint.ts`のscope schemaに従う設定を用意します。`dist/notification-two-phase.mjs`のstdinへ初期設定とruntime tokenを1レコードで渡し、stderrはprivate TTYに接続します。対象hashと期限を含むscopeの承認文言はschemaで検証されます。専用Tunnelから認証付きloopback endpointへ接続します（当時の手順書`docs/notification-tunnel.md`は削除済み）。
 
 購読を1回作成し、確認通信が成功した後、private TTYに表示されたURL全文を確認します。通知を承認する場合だけ、同じstdinへ`activate`レコードを別途渡します。正確な入力契約は`src/notification-two-phase.ts`と`test/two-phase-cli.test.ts`を参照してください。URLの本人への帰属が独立に確認できない場合、その限界を明示した限定試験として承認するか、そこで中止します。
 

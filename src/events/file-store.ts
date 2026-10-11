@@ -32,7 +32,7 @@ const code = (e: unknown) => (e instanceof Error && "code" in e ? e.code : undef
  * One owner process; refuses symlinks and permissive directories. The lock records
  * "<pid> <boot time>". A lock from an earlier boot, or from a process that is no
  * longer running, is reclaimed only when `reclaimStaleLock` is set (a long-running
- * service restarted by launchd); trials keep refusing any existing lock.
+ * service restarted by launchd); otherwise any existing lock is refused.
  */
 export async function openAtomicStore(
   directory: string,

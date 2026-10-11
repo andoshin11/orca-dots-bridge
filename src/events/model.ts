@@ -18,7 +18,7 @@ export const targetSchema = z
 export type Target = z.infer<typeof targetSchema>;
 export const eventNames = ["orca.turn_finished", "orca.input_waiting"] as const;
 export type EventName = (typeof eventNames)[number];
-export function canonical(value: unknown): string {
+function canonical(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object")
     return `{${Object.entries(value)
@@ -29,7 +29,7 @@ export function canonical(value: unknown): string {
 }
 export const digest = (value: unknown) =>
   createHash("sha256").update(canonical(value)).digest("hex");
-export const sameTarget = (a: Target, b: Target) => canonical(a) === canonical(b);
+const sameTarget = (a: Target, b: Target) => canonical(a) === canonical(b);
 const observationSchema = z
   .object({
     target: targetSchema,

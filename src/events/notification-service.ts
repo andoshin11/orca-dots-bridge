@@ -16,7 +16,7 @@ import { createRelayIngress, createRelayServer } from "./relay-ingress.js";
 import { createServiceKeyResolver } from "./service-key.js";
 import { callbackUrl, createPost, EventError, type Post } from "./webhook.js";
 
-// The always-on notification service. Unlike the trials it keeps subscriptions
+// The always-on notification service. It keeps subscriptions
 // across restarts, accepts several panes and lets ChatGPT refresh subscriptions
 // (up to a day each). Whether it may notify at all is the ChatGPT plugin setting
 // 通知を受け取る, read on every subscribe, event and delivery: turning it off
@@ -180,10 +180,7 @@ export async function startNotificationService(options: NotificationServiceOptio
     { watch: hub.watch, describe },
     Date.now,
     maxTtlMs,
-    Number.POSITIVE_INFINITY,
-    false,
     diagnostic,
-    false,
   );
   const rejectedHostPath = join(options.directory, "rejected-callback-host");
   /** Expands dot's handle + worktree ID into the full pane identity the engine keys on. */
