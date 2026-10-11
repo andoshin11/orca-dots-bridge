@@ -1,22 +1,22 @@
 # 通知実装・検証範囲
 
-Orcaのペインごとのターン終了・入力待ちを通知します。プロジェクト全体の完了判定ではありません。既定のstdio MCPとstatus/sendの起動設定は変えず、通知は常駐の通知サービス（`dist/notification-service.mjs`）が担います。使い方は[自動通知](notifications.md)を参照してください。
+Orcaのペインごとのターン終了・入力待ちを通知します。プロジェクト全体の完了判定ではありません。通知は、status/send・ChatGPTの設定画面とあわせて常駐のbridgeサービス（`dist/bridge-service.mjs`）が担います（2026年10月までは通知専用の通知サービス`dist/notification-service.mjs`と、通知用の別のTunnelでした）。使い方は[自動通知](notifications.md)を参照してください。
 
 ## 実装
 
-| ファイル                                                                  | 役割                                                                                            |
-| ------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `src/notification-service.ts`、`src/events/notification-service.ts`       | 常駐の通知サービス。Keychainの鍵を読み、MCP Events入口・relay受け口・購読の保存と再開をまとめる |
-| `src/events/pane-contract.ts`、`pane-rpc.ts`、`relay-ingress.ts`          | ペイン単位の対象とcatalog、relay pluginのメッセージ検証、イベントごとのペイン再確認と監視の停止 |
-| `src/events/engine.ts`、`model.ts`、`orca-contract.ts`、`orca-adapter.ts` | 購読所有者の分離、期限・解除、権限再検査、重複抑制、暗号化outbox、上限付き再配送                |
-| `src/events/http-entry.ts`、`loopback-server.ts`、`service-key.ts`        | loopback限定のMCP Events HTTP入口と、専用32バイトキーによる単一サービス主体の認証               |
-| `src/events/file-store.ts`、`keychain.ts`                                 | 暗号化状態のatomic保存・排他、macOS Keychainへの明示的アクセス                                  |
-| `src/events/webhook.ts`                                                   | Standard Webhooks署名、送信先制約、TLS検証、DNSと送信を合わせた時間制限                         |
-| `src/events/preflight-diagnostics.ts`、`delivery-diagnostics.ts`          | 秘密・URL・raw errorを記録しない固定診断分類                                                    |
+| ファイル                                                                  | 役割                                                                                                                        |
+| ------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `src/bridge-service.ts`、`src/events/bridge-service.ts`                   | 常駐のbridgeサービス。Keychainの鍵を読み、ツール（`src/tools.ts`）・MCP Events入口・relay受け口・購読の保存と再開をまとめる |
+| `src/events/pane-contract.ts`、`pane-rpc.ts`、`relay-ingress.ts`          | ペイン単位の対象とcatalog、relay pluginのメッセージ検証、イベントごとのペイン再確認と監視の停止                             |
+| `src/events/engine.ts`、`model.ts`、`orca-contract.ts`、`orca-adapter.ts` | 購読所有者の分離、期限・解除、権限再検査、重複抑制、暗号化outbox、上限付き再配送                                            |
+| `src/events/http-entry.ts`、`loopback-server.ts`、`service-key.ts`        | loopback限定のMCP Events HTTP入口と、専用32バイトキーによる単一サービス主体の認証                                           |
+| `src/events/file-store.ts`、`keychain.ts`                                 | 暗号化状態のatomic保存・排他、macOS Keychainへの明示的アクセス                                                              |
+| `src/events/webhook.ts`                                                   | Standard Webhooks署名、送信先制約、TLS検証、DNSと送信を合わせた時間制限                                                     |
+| `src/events/preflight-diagnostics.ts`、`delivery-diagnostics.ts`          | 秘密・URL・raw errorを記録しない固定診断分類                                                                                |
 
 保証はペイン単位に限定しています（`orca.pane_activity`と種類別のイベント）。session/turnを推測するのではなく、ペイン単位であること・取りこぼしを検出できないことを、イベント（`assurance: "pane_only"`）とcatalogの説明に明示します。
 
-以前は、専用RPCを追加したOrcaを使うセッション単位の経路（`orca.session_activity`）と、1対象・承認から最長10分で自動停止する試験用の入口（`notification-trial`・`notification-two-phase`・`notification-preflight`・`notification-approval-check`）がありました。常駐版の通知サービスに置き換えたため削除しました。engineには`orca.session_activity`用のschemaが残っていますが、それを使う入口はありません。
+以前は、専用RPCを追加したOrcaを使うセッション単位の経路（`orca.session_activity`）と、1対象・承認から最長10分で自動停止する試験用の入口（`notification-trial`・`notification-two-phase`・`notification-preflight`・`notification-approval-check`）がありました。常駐版の通知サービス（現在のbridgeサービス）に置き換えたため削除しました。engineには`orca.session_activity`用のschemaが残っていますが、それを使う入口はありません。
 
 ## 送信先の制約
 

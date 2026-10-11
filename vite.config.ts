@@ -16,7 +16,7 @@ export default defineConfig({
       "src/mcp.ts",
       "src/relay-key-setup.ts",
       "src/setup.ts",
-      "src/notification-service.ts",
+      "src/bridge-service.ts",
       "src/trial-key-setup.ts",
     ],
     format: ["esm"],

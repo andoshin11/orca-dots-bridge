@@ -36,7 +36,9 @@ export function renderCask(version, sums) {
   zap launchctl: [
         "dev.orca-dots-bridge.notification-tunnel",
         "dev.orca-dots-bridge.notifications",
+        "dev.orca-dots-bridge.service",
         "dev.orca-dots-bridge.status-tunnel",
+        "dev.orca-dots-bridge.tunnel",
       ],
       trash:     "~/.orca-dots-bridge"
 

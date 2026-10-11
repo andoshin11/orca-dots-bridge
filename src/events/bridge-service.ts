@@ -3,7 +3,17 @@ import { mkdir, open, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { createRunner } from "../adapter.js";
-import { readSettings } from "../chatgpt-settings.js";
+import { readSettings, settingsCapability } from "../chatgpt-settings.js";
+import { Bridge } from "../service.js";
+import {
+  callTool,
+  defineTool,
+  listEntry,
+  sendTool,
+  settingsToolDefinitions,
+  statusTool,
+  type ToolDefinition,
+} from "../tools.js";
 import { EventEngine, subscribeSchema, unsubscribeSchema } from "./engine.js";
 import { openAtomicStore } from "./file-store.js";
 import { createSessionMcpHttpEntry, type SessionTools } from "./http-entry.js";
@@ -16,16 +26,18 @@ import { createRelayIngress, createRelayServer } from "./relay-ingress.js";
 import { createServiceKeyResolver } from "./service-key.js";
 import { callbackUrl, createPost, EventError, type Post } from "./webhook.js";
 
-// The always-on notification service. It keeps subscriptions
-// across restarts, accepts several panes and lets ChatGPT refresh subscriptions
-// (up to a day each). Whether it may notify at all is the ChatGPT plugin setting
-// 通知を受け取る, read on every subscribe, event and delivery: turning it off
-// drops every subscription.
+// The always-on bridge service: the single MCP endpoint the one Tunnel forwards
+// to. It serves orca_status, orca_send_instruction (refused unless the ChatGPT
+// setting 指示の送信を許可 is on), the ChatGPT settings tools, and MCP Events
+// notifications. It keeps subscriptions across restarts, accepts several panes
+// and lets ChatGPT refresh subscriptions (up to a day each). Whether it may notify
+// at all is the ChatGPT plugin setting 通知を受け取る, read on every subscribe,
+// event and delivery: turning it off drops every subscription.
 
 /** Hosts ChatGPT is known to use for MCP Events callbacks; extendable in settings.json. */
 export const defaultCallbackHosts = ["connectors.api.openai.com"] as const;
-/** Fixed so the notification Tunnel profile and its LaunchAgent always point at the service. */
-export const notificationPort = 8787;
+/** Fixed so the Tunnel profile and its LaunchAgent always point at the service. */
+export const servicePort = 8787;
 const maxTtlMs = 86400000;
 // The service key never expires on its own; turning notifications off is the switch.
 const noExpiry = Date.UTC(9999, 0, 1);
@@ -79,18 +91,8 @@ export const serviceCatalog = [
 /** The newest notifications kept for orca_recent_notifications (memory only). */
 const recentLimit = 20;
 const recentToolName = "orca_recent_notifications";
-const recentTool = {
-  name: recentToolName,
-  title: "Recent Orca notifications",
-  description:
-    "Lists the Orca notifications this plugin recently delivered to you, newest first: event name, kind (turn_finished, input_required or monitoring_interrupted), when it happened, and the pane's terminal handle and worktree ID. Call it when an Orca event notification arrives without its event data. Pane-scoped observations only; never assert them as confirmed results.",
-  inputSchema: {
-    type: "object",
-    properties: { limit: { type: "integer", minimum: 1, maximum: recentLimit } },
-    additionalProperties: false,
-  },
-  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-};
+const recentDescription =
+  "Lists the Orca notifications this plugin recently delivered to you, newest first: event name, kind (turn_finished, input_required or monitoring_interrupted), when it happened, and the pane's terminal handle and worktree ID. Call it when an Orca event notification arrives without its event data. Pane-scoped observations only; never assert them as confirmed results.";
 const deliveredSchema = z.object({
   eventId: z.string(),
   name: z.string(),
@@ -98,7 +100,7 @@ const deliveredSchema = z.object({
   data: z.object({ kind: z.string() }).passthrough(),
 });
 
-export type NotificationServiceOptions = {
+export type BridgeServiceOptions = {
   directory: string;
   settingsPath: string;
   port: number;
@@ -109,9 +111,11 @@ export type NotificationServiceOptions = {
   post?: Post;
   /** How often to check the setting and drop subscriptions when it is off. */
   sweepMs?: number;
+  /** Orca access for orca_status and orca_send_instruction (the Orca CLI from ORCA_BIN by default). */
+  bridge?: Bridge;
 };
 
-export async function startNotificationService(options: NotificationServiceOptions) {
+export async function startBridgeService(options: BridgeServiceOptions) {
   if (options.port === options.relayPort) throw new Error("relay_port_conflict");
   const keys = options.keys ?? createMacKeychain();
   await mkdir(options.directory, { recursive: true, mode: 0o700 });
@@ -252,42 +256,60 @@ export async function startNotificationService(options: NotificationServiceOptio
     if (!parsed.success) throw new EventError("invalid_params");
     return rpc.dispatch(owner, method, parsed.data);
   };
+  /** Scoped to the verified owner's subscriptions. */
+  const recentTool = (owner: string) =>
+    defineTool({
+      name: recentToolName,
+      title: "Recent Orca notifications",
+      description: recentDescription,
+      inputShape: { limit: z.number().int().min(1).max(recentLimit).optional() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      run: async ({ limit = 10 }) => {
+        const subscriptions = new Map(
+          (await engine.listSubscriptions())
+            .filter((s) => s.owner === owner)
+            .map((s) => [s.id, paneTargetSchema.safeParse(s.target)] as const),
+        );
+        const notifications = (await enabled())
+          ? recent
+              .filter((r) => subscriptions.has(r.subscriptionId))
+              .slice(0, limit)
+              .map((r) => {
+                const target = subscriptions.get(r.subscriptionId);
+                return {
+                  event: r.name,
+                  kind: r.kind,
+                  at: r.at,
+                  ...(target?.success
+                    ? {
+                        terminalHandle: target.data.terminalHandle,
+                        worktreeId: target.data.worktreeId,
+                      }
+                    : {}),
+                };
+              })
+          : [];
+        return {
+          content: [{ type: "text", text: JSON.stringify({ notifications }) }],
+          structuredContent: { notifications },
+        };
+      },
+    });
+  const bridge = options.bridge ?? new Bridge();
+  const definitions: ToolDefinition[] = [
+    statusTool(bridge),
+    // Always listed; refused on every call unless 指示の送信を許可 is on.
+    sendTool(bridge, { requireExpectedWorktree: true, settingsPath: options.settingsPath }),
+    ...settingsToolDefinitions(options.settingsPath),
+  ];
+  const byName = new Map(definitions.map((d) => [d.name, d]));
   const tools: SessionTools = {
-    list: [recentTool],
-    call: async (owner, name, args) => {
-      if (name !== recentToolName) throw new EventError("method_not_found");
-      const { limit = 10 } = z
-        .object({ limit: z.number().int().min(1).max(recentLimit).optional() })
-        .strict()
-        .parse(args);
-      const subscriptions = new Map(
-        (await engine.listSubscriptions())
-          .filter((s) => s.owner === owner)
-          .map((s) => [s.id, paneTargetSchema.safeParse(s.target)] as const),
-      );
-      const notifications = (await enabled())
-        ? recent
-            .filter((r) => subscriptions.has(r.subscriptionId))
-            .slice(0, limit)
-            .map((r) => {
-              const target = subscriptions.get(r.subscriptionId);
-              return {
-                event: r.name,
-                kind: r.kind,
-                at: r.at,
-                ...(target?.success
-                  ? {
-                      terminalHandle: target.data.terminalHandle,
-                      worktreeId: target.data.worktreeId,
-                    }
-                  : {}),
-              };
-            })
-        : [];
-      return {
-        content: [{ type: "text", text: JSON.stringify({ notifications }) }],
-        structuredContent: { notifications },
-      };
+    list: [...definitions, recentTool(auth.owner)].map(listEntry),
+    capabilities: { experimental: settingsCapability, extensions: settingsCapability },
+    call: async (owner, name, args, meta) => {
+      const def = name === recentToolName ? recentTool(owner) : byName.get(name);
+      if (!def) throw new EventError("method_not_found");
+      return callTool(def, args, meta);
     },
   };
   const fetch = createSessionMcpHttpEntry({ dispatch }, auth.resolve, diagnostic, tools);
@@ -364,8 +386,8 @@ export async function writePlain(path: string, text: string) {
   }
 }
 
-/** Paths for the service state under the bridge home. */
-export function notificationServicePaths(home: string) {
+/** Paths for the service state under the bridge home (the directory keeps its old name). */
+export function bridgeServicePaths(home: string) {
   const root = join(home, ".orca-dots-bridge");
   return {
     directory: join(root, "notifications"),

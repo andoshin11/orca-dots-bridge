@@ -8,7 +8,7 @@ const done = new Set(["ok", "created", "updated"]);
 /** One level for the tray: any error wins, then anything a person still has to do. */
 export function overallLevel(steps) {
   if (steps.some((s) => s.status === "error")) return "error";
-  const tunnel = steps.find((s) => s.step === "status-tunnel");
+  const tunnel = steps.find((s) => s.step === "tunnel");
   if (steps.some((s) => s.status === "action") || !tunnel || !done.has(tunnel.status))
     return "action";
   return "ok";
@@ -24,20 +24,38 @@ export const stepLabels = {
   platform: "macOS",
   settings: "設定",
   orca: "Orca",
-  "trial-keys": "通知用の鍵",
+  "trial-keys": "サービスの鍵",
   "service-authorization": "dot 認証ファイル",
   relay: "relay plugin 設定",
   "runtime-key": "runtime キー",
   "tunnel-client": "tunnel-client",
-  "status-profile": "状態確認用 profile",
-  "notification-profile": "通知用 profile",
-  "status-doctor": "profile の検証",
-  "launch-agent": "自動起動（LaunchAgent）",
-  "status-tunnel": "状態確認用 Tunnel",
-  "notification-service": "通知サービス（自動起動）",
-  "notification-tunnel-agent": "通知用 Tunnel（自動起動）",
-  "notification-tunnel": "通知用 Tunnel",
+  profile: "Tunnel の profile",
+  "legacy-service": "旧・通知サービス",
+  service: "bridge サービス（自動起動）",
+  "profile-doctor": "profile の検証",
+  "legacy-status-tunnel": "旧・状態確認用 Tunnel",
+  "tunnel-agent": "Tunnel（自動起動）",
+  tunnel: "Tunnel",
+  "legacy-notification-tunnel": "旧・通知用 Tunnel",
+  "legacy-profiles": "旧 profile",
 };
+
+/**
+ * Whether doctor found something setup with installAgent would fix on its own:
+ * a LaunchAgent of the earlier two-Tunnel layout that is still loaded, or a service
+ * LaunchAgent pointing at an earlier runtime.
+ */
+export function needsAgentRefresh(steps) {
+  return steps.some(
+    (s) =>
+      (s.step.startsWith("legacy-") &&
+        s.status === "action" &&
+        s.detail.includes("still loaded")) ||
+      (["service", "tunnel-agent"].includes(s.step) &&
+        s.status === "action" &&
+        s.detail.startsWith("outdated")),
+  );
+}
 
 /** Where a Node binary usually lives; GUI apps do not inherit the shell PATH. */
 export function nodeCandidates(home) {
@@ -66,13 +84,11 @@ export function parseSetupRequest(input) {
     replaceRuntimeKey: input.useClipboardKey === true && input.replaceRuntimeKey === true,
     installTunnelClient: input.installTunnelClient === true,
     installAgent: input.installAgent === true,
-    installNotifications: input.installNotifications === true,
   };
-  for (const key of ["statusTunnelId", "notificationTunnelId"]) {
-    const value = typeof input[key] === "string" ? input[key].trim() : "";
-    if (value === "") continue;
-    if (!tunnelIdPattern.test(value)) throw new Error(`invalid_${key}`);
-    request[key] = value;
+  const tunnelId = typeof input.tunnelId === "string" ? input.tunnelId.trim() : "";
+  if (tunnelId !== "") {
+    if (!tunnelIdPattern.test(tunnelId)) throw new Error("invalid_tunnelId");
+    request.tunnelId = tunnelId;
   }
   return request;
 }

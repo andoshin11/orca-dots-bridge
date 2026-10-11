@@ -4,35 +4,39 @@
 
 _A bridge that lets ChatGPT (dot) check the status of agents running in Orca on your Mac, and optionally send one explicit instruction to one agent. macOS only._
 
-| 機能                                              | 状態                                                                                                                                                                                                                                       |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| dot から Orca の状態を確認する                    | 利用可能                                                                                                                                                                                                                                   |
-| dot から1つのエージェントへ追加の指示を送る       | 利用可能・既定はオフ（ChatGPT のプラグイン設定で許可。実エージェントへの送信は未検証）                                                                                                                                                     |
-| エージェントのターン終了などを dot へ自動通知する | Orca の experimental plugin（[orca-agent-status-relay](https://github.com/andoshin11/orca-agent-status-relay)）を利用。ペイン単位で、既定はオフ（ChatGPT のプラグイン設定で許可）。dot への到達は確認中です。[詳細](docs/notifications.md) |
+| 機能                                              | 状態                                                                                                                                               |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| dot から Orca の状態を確認する                    | 利用可能                                                                                                                                           |
+| dot から1つのエージェントへ追加の指示を送る       | 利用可能・既定はオフ（ChatGPT のプラグイン設定で許可。実エージェントへの送信は未検証）                                                             |
+| エージェントのターン終了などを dot へ自動通知する | Orca の experimental plugin（Agent Status Relay）を利用。ペイン単位で、既定はオフ（ChatGPT のプラグイン設定で許可）。[詳細](docs/notifications.md) |
 
 ## アーキテクチャ
 
 ```mermaid
 flowchart LR
   subgraph cloud["ChatGPT"]
-    dot["dot（個人用プラグイン）"]
-    settings["プラグイン設定<br/>「指示の送信を許可」"]
+    dot["dot（個人用プラグイン 1 つ）"]
+    settings["プラグイン設定<br/>「指示の送信を許可」「通知を受け取る」"]
   end
   subgraph mac["Mac（同じログインユーザー）"]
     app["メニューバーアプリ<br/>初回の準備・状態表示"]
     tunnel["tunnel-client<br/>（LaunchAgent で常駐）"]
-    bridge["bridge（MCP サーバー）"]
+    bridge["bridge サービス（常駐）<br/>127.0.0.1:8787"]
+    relay["Agent Status Relay<br/>（Orca のプラグイン、任意）"]
     orca["Orca（CLI / runtime）"]
   end
   dot -- "MCP（Secure MCP Tunnel）" --> tunnel
   settings -. "設定の読み書き" .-> tunnel
-  tunnel -- "stdio" --> bridge
+  tunnel -- "HTTP（ローカルのみ）" --> bridge
   bridge -- "Orca CLI" --> orca
-  app -. "setup" .-> tunnel
+  orca --> relay
+  relay -- "ペインの状態変化" --> bridge
+  bridge -. "通知（webhook）" .-> dot
+  app -. "setup" .-> bridge
 ```
 
-- dot は Secure MCP Tunnel で Mac 上の bridge を呼びます。Tunnel クライアントは Mac から外へ接続するだけで、Mac でポートを開きません。
-- bridge が公開するツールは `orca_status`（状態確認）と `orca_send_instruction`（指定した1端末への追加指示）です。送信は、ChatGPT のプラグイン管理画面で「指示の送信を許可」をオンにしたときだけ受け付けます。
+- dot は 1 つの Secure MCP Tunnel で Mac 上の bridge サービスを呼びます。Tunnel クライアントは Mac から外へ接続するだけで、Mac でポートを開きません。bridge サービスが待ち受けるのは `127.0.0.1` だけです。
+- bridge サービスが公開するツールは `orca_status`（状態確認）、`orca_send_instruction`（指定した1端末への追加指示）、`orca_recent_notifications`（届いた通知の確認）と、ChatGPT の設定画面用の2つです。送信は「指示の送信を許可」、通知は「通知を受け取る」を ChatGPT のプラグイン管理画面でオンにしたときだけ受け付けます。
 - メニューバーアプリは、Tunnel ができる前の初回準備と、Tunnel が動いているかの表示を受け持ちます。設定や許可は ChatGPT 側の画面で行います。
 
 詳しくは[アーキテクチャと実装状況](docs/architecture.md)を参照してください。
@@ -43,12 +47,21 @@ flowchart LR
 
 1. **アプリを入れる。** Homebrew では `brew install --cask andoshin11/tap/orca-dots-bridge` で入ります（更新は `brew upgrade --cask orca-dots-bridge`）。手動で入れる場合は、[Releases](https://github.com/andoshin11/orca-dots-bridge/releases/latest) から `Orca-Dots-Bridge-<版>-mac-arm64.zip`（Intel Mac は `-mac-x64.zip`）をダウンロードして展開し、**Finder で**「アプリケーション」フォルダへドラッグして移してから開きます。どちらの方法でも、開発者署名をしていないため、初回は「開いていません」と表示されます。「完了」を押し、「システム設定」→「プライバシーとセキュリティ」の「このまま開く」を押して、確認のダイアログで再度「このまま開く」を選び、Mac のログインパスワードを入力します（1回だけです）。
 2. **アプリの画面に沿って準備する（初回だけ）。** 各手順に Platform・ChatGPT の画面のスクリーンショットがあります。
-   1. Platform で Tunnel を作り、ID を貼り付ける
+   1. Platform で Tunnel を 1 つ作り、ID を貼り付ける
    2. Platform で runtime キー（Restricted、Tunnels の Read と Use、期限付き）を作ってコピーする
-   3. 「セットアップを実行」を押す（tunnel-client の導入と、ログイン時の自動起動まで行います）
-   4. ChatGPT で「カスタム MCP サーバー」を追加する（接続タイプはトンネル、認証なし）
+   3. 「セットアップを実行」を押す（tunnel-client の導入と、bridge サービス・Tunnel のログイン時の自動起動まで行います）
+   4. ChatGPT で「カスタム MCP サーバー」を 1 つ追加する（接続タイプはトンネル、認証なし）
 3. **dot から使う。** 「Orca の ○○ の作業はどうなってる？」のように聞きます。指示も送りたい場合は、ChatGPT のプラグイン管理画面で「指示の送信を許可」をオンにします。
-4. **（任意）自動通知を使う。** Orca に relay plugin を入れ、アプリで通知用の Tunnel ID を入れて「通知サービスと通知用の Tunnel を常駐させる」をオンにし、ChatGPT のプラグイン設定で「通知を受け取る」をオンにします。手順は[自動通知](docs/notifications.md)を参照してください。
+4. **（任意）自動通知を使う。** Orca の「設定」→「プラグイン」→「ソースを管理」で Git のソース `https://github.com/andoshin11/orca-plugins`（ref は `main`）を追加し、**Agent Status Relay** をインストールして「プラグインを有効にする」を押します（権限は events:subscribe）。そのうえで ChatGPT のプラグイン管理画面で「通知を受け取る」をオンにします。Tunnel やプラグインを追加する必要はありません。詳しくは[自動通知](docs/notifications.md)を参照してください。
+
+### 以前の 2 つの Tunnel の構成から移る
+
+以前は状態確認用と通知用に Tunnel と ChatGPT プラグインを 2 つずつ使っていました。今は 1 つずつです。
+
+1. 新しいアプリを開きます（更新後の初回起動で自動的に移行します）。CLI の場合は `node dist/setup.mjs --install-agent` を実行します。状態確認用の Tunnel ID をそのまま使い、古い LaunchAgent と profile を片付けます。
+2. ChatGPT で状態確認用のプラグイン（Orca Status など）の管理画面を開き、「ツールを更新」を押します。
+3. 通知用に作ったプラグインは ChatGPT で削除します。Platform の通知用 Tunnel も、不要なら削除できます。
+4. dot に通知の購読をもう一度頼みます。
 
 runtime キーの期限が近づいたら、新しいキーをコピーしてアプリの「コピーした新しいキーに入れ替える」で入れ替えます。うまく動かないときは[よくあるつまずき](docs/troubleshooting.md)を参照してください。
 
@@ -58,10 +71,10 @@ runtime キーの期限が近づいたら、新しいキーをコピーしてア
 
 ```sh
 node dist/cli.mjs status --repo <repo> --name <作業名>
-pbpaste | node dist/setup.mjs --runtime-key-stdin --status-tunnel-id <Tunnel ID> --install-tunnel-client --install-agent
+pbpaste | node dist/setup.mjs --runtime-key-stdin --tunnel-id <Tunnel ID> --install-tunnel-client --install-agent
 ```
 
-アプリと CLI の `setup` はどちらも同じ状態確認用 Tunnel を設定します。片方だけを使ってください（あとから実行した方の bridge を Tunnel が使います）。
+アプリと CLI の `setup` はどちらも同じ bridge サービスと Tunnel を設定します。片方だけを使ってください（あとから実行した方の bridge をサービスが使います）。
 
 ## ドキュメント
 

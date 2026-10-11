@@ -10,7 +10,18 @@ import type { DiagnosticRecord, DiagnosticStage } from "./preflight-diagnostics.
 /** Optional MCP tools served next to the events, scoped to the verified owner. */
 export type SessionTools = {
   list: Record<string, unknown>[];
-  call: (owner: string, name: string, args: unknown) => Promise<Record<string, unknown>>;
+  /**
+   * Runs one tool with the request `_meta`. Handler failures come back as `isError`
+   * results; a throw (e.g. an unknown tool) becomes a protocol error.
+   */
+  call: (
+    owner: string,
+    name: string,
+    args: unknown,
+    meta: Record<string, unknown> | undefined,
+  ) => Promise<Record<string, unknown>>;
+  /** Extra server capabilities (e.g. `experimental`, `extensions`) next to tools and events. */
+  capabilities?: Record<string, unknown>;
 };
 /** No listener or credential defaults. The caller supplies a verified token resolver and durable engine. */
 export function createSessionMcpHttpEntry(
@@ -73,8 +84,8 @@ export function createSessionMcpHttpEntry(
     }
     const handler = createMcpHandler(
       () => {
-        const server = new McpServer({ name: "orca-session-events", version: "0.1.0" });
-        const capabilities = { tools: {}, events: {} };
+        const server = new McpServer({ name: "orca-dots-bridge", version: "0.1.0" });
+        const capabilities = { ...tools?.capabilities, tools: {}, events: {} };
         server.server.registerCapabilities(capabilities);
         server.server.setRequestHandler(
           "tools/list",
@@ -93,11 +104,20 @@ export function createSessionMcpHttpEntry(
               dispatched = true;
               diagnostic?.("rpc_dispatch");
               const call = z
-                .object({ name: z.string(), arguments: z.unknown().optional() })
+                .object({
+                  name: z.string(),
+                  arguments: z.unknown().optional(),
+                  _meta: z.record(z.unknown()).optional(),
+                })
                 .safeParse(params);
               if (!call.success) throw new ProtocolError(-32602, "Invalid tool call");
               try {
-                return await tools.call(owner, call.data.name, call.data.arguments ?? {});
+                return await tools.call(
+                  owner,
+                  call.data.name,
+                  call.data.arguments ?? {},
+                  call.data._meta,
+                );
               } catch {
                 diagnostic?.("rpc_rejected");
                 throw new ProtocolError(-32602, "Tool call rejected");
