@@ -195,7 +195,14 @@ async function runSetup(input) {
       if (!key) return { error: "clipboard_has_no_runtime_key" };
       options.runtimeKey = key;
     }
-    const { steps } = await setup.runSetup(io, options);
+    let steps;
+    try {
+      ({ steps } = await setup.runSetup(io, options));
+    } finally {
+      // Re-check even when setup stopped partway: it may already have moved the services,
+      // and the window must not keep showing the state from before the run.
+      await doctor().catch(() => undefined);
+    }
     // Clear the clipboard only once the key is stored, and only if it still holds that key.
     if (
       runtimeKeyFromClipboard(clipboard.readText()) === options.runtimeKey &&
@@ -203,7 +210,6 @@ async function runSetup(input) {
       steps.some((s) => s.step === "runtime-key" && ["ok", "created", "updated"].includes(s.status))
     )
       clipboard.clear();
-    await doctor();
     return { steps };
   });
 }
@@ -475,7 +481,10 @@ async function start() {
   // and an install from the earlier two-Tunnel layout still runs its old agents.
   // Fixing either needs no new input (the saved status Tunnel ID becomes the one
   // Tunnel ID), so do what "セットアップを実行" with automatic start would do.
-  if (needsAgentRefresh(state.steps)) await runSetup({ installAgent: true }).catch(() => undefined);
+  if (needsAgentRefresh(state.steps))
+    await runSetup({ installAgent: true }).catch((error) => {
+      console.error("automatic setup after update failed:", error);
+    });
   // Once the services point at this version, older bridge copies can go.
   if (usesBundledRuntime) await pruneRuntimes().catch(() => undefined);
   updater = createUpdater({ onChange: notify, isBusy: () => busy });
