@@ -6,7 +6,7 @@ import { createRunner } from "../adapter.js";
 import { readSettings } from "../chatgpt-settings.js";
 import { EventEngine, subscribeSchema, unsubscribeSchema } from "./engine.js";
 import { openAtomicStore } from "./file-store.js";
-import { createSessionMcpHttpEntry } from "./http-entry.js";
+import { createSessionMcpHttpEntry, type SessionTools } from "./http-entry.js";
 import { createMacKeychain, type KeyAccount } from "./keychain.js";
 import { createLoopbackServer } from "./loopback-server.js";
 import { createPaneDescriber, paneTargetSchema, type PaneDescriber } from "./pane-contract.js";
@@ -76,6 +76,28 @@ export const serviceCatalog = [
   },
 }));
 
+/** The newest notifications kept for orca_recent_notifications (memory only). */
+const recentLimit = 20;
+const recentToolName = "orca_recent_notifications";
+const recentTool = {
+  name: recentToolName,
+  title: "Recent Orca notifications",
+  description:
+    "Lists the Orca notifications this plugin recently delivered to you, newest first: event name, kind (turn_finished, input_required or monitoring_interrupted), when it happened, and the pane's terminal handle and worktree ID. Call it when an Orca event notification arrives without its event data. Pane-scoped observations only; never assert them as confirmed results.",
+  inputSchema: {
+    type: "object",
+    properties: { limit: { type: "integer", minimum: 1, maximum: recentLimit } },
+    additionalProperties: false,
+  },
+  annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+};
+const deliveredSchema = z.object({
+  eventId: z.string(),
+  name: z.string(),
+  timestamp: z.string(),
+  data: z.object({ kind: z.string() }).passthrough(),
+});
+
 export type NotificationServiceOptions = {
   directory: string;
   settingsPath: string;
@@ -121,12 +143,35 @@ export async function startNotificationService(options: NotificationServiceOptio
   });
   const describe = options.describe ?? createPaneDescriber(createRunner());
   const hub = createRelayHub();
+  // Remembers what reached ChatGPT, so dot can read it with orca_recent_notifications
+  // when the notification itself arrives without the event data.
+  const recent: {
+    subscriptionId: string;
+    eventId: string;
+    name: string;
+    kind: string;
+    at: string;
+  }[] = [];
+  const basePost = options.post ?? createPost(options.callbackHosts);
+  const post: Post = async (url, headers, body, signal) => {
+    const reply = await basePost(url, headers, body, signal);
+    const delivered = deliveredSchema.safeParse(JSON.parse(body));
+    const subscriptionId = headers["X-MCP-Subscription-Id"];
+    if (reply.status >= 200 && reply.status < 300 && delivered.success && subscriptionId) {
+      const { eventId, name, timestamp, data } = delivered.data;
+      if (!recent.some((r) => r.eventId === eventId && r.subscriptionId === subscriptionId)) {
+        recent.unshift({ subscriptionId, eventId, name, kind: data.kind, at: timestamp });
+        recent.splice(recentLimit);
+      }
+    }
+    return reply;
+  };
   const engine = await EventEngine.open({
     key: encryptionKey,
     store,
     diagnostic,
     allowedCallbackHosts: options.callbackHosts,
-    post: options.post ?? createPost(options.callbackHosts),
+    post,
     authorize: async (owner, target) =>
       owner === auth.owner && paneTargetSchema.safeParse(target).success && (await enabled()),
   });
@@ -210,7 +255,45 @@ export async function startNotificationService(options: NotificationServiceOptio
     if (!parsed.success) throw new EventError("invalid_params");
     return rpc.dispatch(owner, method, parsed.data);
   };
-  const fetch = createSessionMcpHttpEntry({ dispatch }, auth.resolve, diagnostic);
+  const tools: SessionTools = {
+    list: [recentTool],
+    call: async (owner, name, args) => {
+      if (name !== recentToolName) throw new EventError("method_not_found");
+      const { limit = 10 } = z
+        .object({ limit: z.number().int().min(1).max(recentLimit).optional() })
+        .strict()
+        .parse(args);
+      const subscriptions = new Map(
+        (await engine.listSubscriptions())
+          .filter((s) => s.owner === owner)
+          .map((s) => [s.id, paneTargetSchema.safeParse(s.target)] as const),
+      );
+      const notifications = (await enabled())
+        ? recent
+            .filter((r) => subscriptions.has(r.subscriptionId))
+            .slice(0, limit)
+            .map((r) => {
+              const target = subscriptions.get(r.subscriptionId);
+              return {
+                event: r.name,
+                kind: r.kind,
+                at: r.at,
+                ...(target?.success
+                  ? {
+                      terminalHandle: target.data.terminalHandle,
+                      worktreeId: target.data.worktreeId,
+                    }
+                  : {}),
+              };
+            })
+        : [];
+      return {
+        content: [{ type: "text", text: JSON.stringify({ notifications }) }],
+        structuredContent: { notifications },
+      };
+    },
+  };
+  const fetch = createSessionMcpHttpEntry({ dispatch }, auth.resolve, diagnostic, tools);
   const server = createLoopbackServer(
     options.port,
     () => (closed ? undefined : { fetch }),
