@@ -27,6 +27,7 @@ import {
 } from "electron";
 import {
   externalPages,
+  needsAgentRefresh,
   nodeCandidates,
   overallLevel,
   parseSetupRequest,
@@ -37,7 +38,7 @@ import {
 } from "./lib.mjs";
 
 // Menu bar shell around the bridge's `setup` command: it shows the doctor result,
-// runs setup with what a person enters, and keeps an eye on the status Tunnel.
+// runs setup with what a person enters, and keeps an eye on the Tunnel.
 // Key material never reaches the renderer; the runtime key goes from the
 // clipboard straight into setup.
 
@@ -52,9 +53,9 @@ const exists = (path) =>
   );
 
 /**
- * A release app carries the built bridge in its Resources. The status Tunnel keeps
- * running from launchd after the app quits and the profile cannot hold paths with
- * spaces, so the bridge is copied to ~/.orca-dots-bridge/runtime/<version> and this
+ * A release app carries the built bridge in its Resources. The bridge service keeps
+ * running from launchd after the app quits and its LaunchAgent is kept free of paths
+ * with spaces, so the bridge is copied to ~/.orca-dots-bridge/runtime/<version> and this
  * app's Electron binary is linked there to serve as Node (ELECTRON_RUN_AS_NODE).
  */
 async function bundledRuntime() {
@@ -92,7 +93,7 @@ const isExecutable = (path) =>
     () => false,
   );
 
-/** Electron's own execPath is not Node, so the status Tunnel needs a real Node binary. */
+/** Electron's own execPath is not Node, so the bridge service needs a real Node binary. */
 async function resolveNode() {
   const fromShell = await run("/bin/zsh", ["-lc", "command -v node"], { timeout: 5000 })
     .then(({ stdout }) => stdout.trim().split("\n").pop() ?? "")
@@ -147,7 +148,7 @@ async function doctor() {
     settings,
     nextActions: setup.nextActions(steps, settings),
     checkedAt: new Date().toISOString(),
-    tunnelReady: steps.some((s) => s.step === "status-tunnel" && s.status === "ok"),
+    tunnelReady: steps.some((s) => s.step === "tunnel" && s.status === "ok"),
   });
 }
 
@@ -165,9 +166,7 @@ async function exclusive(task) {
 
 /** Cheap readiness probe for the tray between full doctor runs. */
 async function probeTunnel() {
-  const base = (
-    await readFile(setup.setupPaths(home).statusHealthUrl, "utf8").catch(() => "")
-  ).trim();
+  const base = (await readFile(setup.setupPaths(home).healthUrl, "utf8").catch(() => "")).trim();
   const code = base ? await io.probe(`${base.replace(/\/$/, "")}/readyz`).catch(() => 0) : 0;
   if (state.tunnelReady !== (code === 200)) {
     state.tunnelReady = code === 200;
@@ -181,7 +180,7 @@ async function runSetup(input) {
     const options = {
       mode: "setup",
       ...request,
-      // A bundled runtime or an explicit ORCA_DOTS_NODE replaces a Node recorded in the profile.
+      // A bundled runtime or an explicit ORCA_DOTS_NODE replaces a Node recorded in the service LaunchAgent.
       ...(process.env.ORCA_DOTS_NODE || usesBundledRuntime ? { nodePath: io.nodePath } : {}),
     };
     if (request.useClipboardKey) {
@@ -205,7 +204,7 @@ async function runSetup(input) {
 async function restartAgent() {
   const uid = process.getuid?.() ?? -1;
   await exclusive(() =>
-    run("/bin/launchctl", ["kickstart", "-k", `gui/${uid}/${setup.launchAgentLabel}`]),
+    run("/bin/launchctl", ["kickstart", "-k", `gui/${uid}/${setup.tunnelLabel}`]),
   );
   setTimeout(() => void probeTunnel(), 5000);
 }
@@ -241,12 +240,13 @@ function buildMenu(level) {
     const step = state.steps.find((s) => s.step === name);
     return { label: `${stepLabels[name]}: ${step ? step.status : "—"}`, enabled: false };
   };
-  const agentLoaded = state.steps.some((s) => s.step === "launch-agent" && s.status === "ok");
+  const agentLoaded = state.steps.some((s) => s.step === "tunnel-agent" && s.status === "ok");
   return Menu.buildFromTemplate([
     { label: headline, enabled: false },
     line("orca"),
-    line("status-tunnel"),
-    line("launch-agent"),
+    line("service"),
+    line("tunnel"),
+    line("tunnel-agent"),
     { type: "separator" },
     { label: "セットアップと詳細…", click: openWindow },
     {
@@ -328,7 +328,7 @@ function registerIpc() {
 
 /**
  * macOS runs a downloaded app that was not moved with Finder from a temporary,
- * read-only copy (App Translocation). Linking the status Tunnel to that copy would
+ * read-only copy (App Translocation). Linking the bridge service to that copy would
  * break it after the next restart, so ask for a proper install instead.
  */
 const translocated = () => process.execPath.includes("/AppTranslocation/");
@@ -337,7 +337,7 @@ async function start() {
   if (app.isPackaged && translocated()) {
     dialog.showErrorBox(
       "アプリを「アプリケーション」へ移してください",
-      "macOS がこのアプリを一時的な場所で実行しています。このままでは、状態確認用 Tunnel の自動起動が Mac の再起動後に動かなくなります。\n\nFinder で「Orca Dots Bridge」を「アプリケーション」フォルダへドラッグして移し、そこから開き直してください。",
+      "macOS がこのアプリを一時的な場所で実行しています。このままでは、bridge サービスと Tunnel の自動起動が Mac の再起動後に動かなくなります。\n\nFinder で「Orca Dots Bridge」を「アプリケーション」フォルダへドラッグして移し、そこから開き直してください。",
     );
     return app.quit();
   }
@@ -365,7 +365,7 @@ async function start() {
     return app.quit();
   }
   setup = await import(pathToFileURL(setupModule).href);
-  if (typeof setup.systemSetupIo !== "function" || typeof setup.recordedNodePath !== "function") {
+  if (typeof setup.systemSetupIo !== "function" || typeof setup.tunnelLabel !== "string") {
     dialog.showErrorBox(
       "bridge が古い可能性があります",
       `${setupModule} がこのアプリに対応していません。bridge のフォルダで npm run build を実行してください。`,
@@ -383,16 +383,11 @@ async function start() {
   tray = new Tray(nativeImage.createEmpty());
   tray.setTitle("Orca …");
   await exclusive(doctor).catch(() => undefined);
-  // After an app update the status profile still points at the previous runtime.
-  // Rewriting it needs no new input, so do what "セットアップを実行" would do.
-  const profile = state.steps.find((s) => s.step === "status-profile");
-  const loaded = (step) => state.steps.some((s) => s.step === step && s.status === "ok");
-  if (usesBundledRuntime && profile?.detail === "outdated" && loaded("launch-agent"))
-    await runSetup({
-      installAgent: true,
-      // Keep notifications on the new runtime too when they were already installed.
-      installNotifications: loaded("notification-service"),
-    }).catch(() => undefined);
+  // After an app update the service LaunchAgent still points at the previous runtime,
+  // and an install from the earlier two-Tunnel layout still runs its old agents.
+  // Fixing either needs no new input (the saved status Tunnel ID becomes the one
+  // Tunnel ID), so do what "セットアップを実行" with automatic start would do.
+  if (needsAgentRefresh(state.steps)) await runSetup({ installAgent: true }).catch(() => undefined);
   registerIpc();
   notify();
   if (overallLevel(state.steps) !== "ok") openWindow();

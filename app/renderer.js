@@ -38,10 +38,8 @@ function render(state) {
   $("checked").textContent = state.checkedAt
     ? `最終確認: ${new Date(state.checkedAt).toLocaleString()}`
     : "";
-  const tunnel = state.settings.statusTunnelId;
-  if (tunnel && !$("statusTunnelId").value) $("statusTunnelId").placeholder = tunnel;
-  if (state.settings.notificationTunnelId)
-    $("notificationTunnelId").placeholder = state.settings.notificationTunnelId;
+  const tunnel = state.settings.tunnelId;
+  if (tunnel && !$("tunnelId").value) $("tunnelId").placeholder = tunnel;
   $("pluginTunnel").textContent = tunnel ?? "（Tunnel ID が未設定）";
   const runtimeReady = state.steps.some(
     (s) => s.step === "runtime-key" && ["ok", "created"].includes(s.status),
@@ -54,7 +52,7 @@ function render(state) {
   for (const button of document.querySelectorAll("button")) button.disabled = state.busy;
   $("copyTunnel").disabled = !tunnel || state.busy;
   $("restart").disabled =
-    state.busy || !state.steps.some((s) => s.step === "launch-agent" && s.status === "ok");
+    state.busy || !state.steps.some((s) => s.step === "tunnel-agent" && s.status === "ok");
   $("loginItemRow").hidden = !state.packaged;
   $("openAtLogin").checked = state.openAtLogin;
   $("paths").textContent = `bridge: ${state.bridgeDir ?? "—"} ／ node: ${state.nodePath ?? "—"}`;
@@ -63,28 +61,24 @@ function render(state) {
 const errorText = {
   clipboard_has_no_runtime_key:
     "クリップボードに runtime キー（sk-…）がありません。Platform でキーをコピーしてから実行してください。",
-  invalid_statusTunnelId: "状態確認用の Tunnel ID の形式が違います（tunnel_… ）。",
-  invalid_notificationTunnelId: "通知用の Tunnel ID の形式が違います（tunnel_… ）。",
+  invalid_tunnelId: "Tunnel ID の形式が違います（tunnel_… ）。",
   busy: "別の処理を実行中です。",
 };
 
 $("run").addEventListener("click", async () => {
   $("result").textContent = "実行中…";
   const response = await window.bridge.setup({
-    statusTunnelId: $("statusTunnelId").value,
-    notificationTunnelId: $("notificationTunnelId").value,
+    tunnelId: $("tunnelId").value,
     useClipboardKey: $("useClipboardKey").checked,
     replaceRuntimeKey: runtimeKeyStored,
     installTunnelClient: $("installTunnelClient").checked,
     installAgent: $("installAgent").checked,
-    installNotifications: $("installNotifications").checked,
   });
   if (response.error) $("result").textContent = errorText[response.error] ?? response.error;
   else {
     const errors = response.steps.filter((s) => s.status === "error").length;
     $("result").textContent = errors ? `${errors} 件のエラーがあります。` : "完了しました。";
-    $("statusTunnelId").value = "";
-    $("notificationTunnelId").value = "";
+    $("tunnelId").value = "";
     $("useClipboardKey").checked = false;
   }
   render(response.state);

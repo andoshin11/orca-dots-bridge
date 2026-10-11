@@ -14,7 +14,7 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { notificationPort } from "./events/notification-service.js";
+import { servicePort } from "./events/bridge-service.js";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -27,9 +27,11 @@ import {
 } from "./key-setup-shared.js";
 
 // One command that brings this Mac to "dot can call orca_status through the
-// Tunnel": keys, the relay plugin config, tunnel-client, Tunnel profiles and an
-// optional LaunchAgent. Every step is idempotent and never replaces anything it
-// did not create. Secrets are never printed or passed on argv.
+// Tunnel": keys, the relay plugin config, tunnel-client, the Tunnel profile and
+// LaunchAgents for the always-on bridge service and its Tunnel. Every step is
+// idempotent and never replaces anything it did not create. Secrets are never
+// printed or passed on argv. Installs from the earlier two-Tunnel layout are
+// migrated: their LaunchAgents and profiles are retired once the new ones run.
 
 /** tunnel-client release pinned by version and archive digest (docs were verified on 0.0.15). */
 export const tunnelClientRelease = {
@@ -40,10 +42,16 @@ export const tunnelClientRelease = {
   },
 } as const;
 
-export const launchAgentLabel = "dev.orca-dots-bridge.status-tunnel";
-export const notificationServiceLabel = "dev.orca-dots-bridge.notifications";
-export const notificationTunnelLabel = "dev.orca-dots-bridge.notification-tunnel";
+export const serviceLabel = "dev.orca-dots-bridge.service";
+export const tunnelLabel = "dev.orca-dots-bridge.tunnel";
+/** LaunchAgents of the earlier two-Tunnel layout, retired by `setup --install-agent`. */
+export const legacyLabels = {
+  statusTunnel: "dev.orca-dots-bridge.status-tunnel",
+  service: "dev.orca-dots-bridge.notifications",
+  notificationTunnel: "dev.orca-dots-bridge.notification-tunnel",
+} as const;
 const managedMarker = "# managed by orca-dots-bridge setup";
+const agentMarker = "managed by orca-dots-bridge setup";
 const tunnelIdPattern = /^tunnel_[A-Za-z0-9]{8,64}$/;
 const runtimeKeyPattern = /^sk-[A-Za-z0-9_-]{20,256}$/;
 export const setupUrls = {
@@ -55,39 +63,37 @@ export const setupUrls = {
 export function setupPaths(home: string) {
   const root = join(home, ".orca-dots-bridge");
   const tunnel = join(root, "tunnel");
+  const agent = (label: string) => join(home, "Library", "LaunchAgents", `${label}.plist`);
   return {
     root,
     settings: join(root, "settings.json"),
     runtimeKey: join(tunnel, "control-plane-api-key"),
     serviceAuthorization: join(tunnel, "service-authorization"),
-    statusProfile: join(tunnel, "profiles", "orca-status.yaml"),
-    notificationProfile: join(tunnel, "profiles", "orca-notifications.yaml"),
-    statusHealthUrl: join(tunnel, "orca-status-health.url"),
-    notificationHealthUrl: join(tunnel, "orca-notifications-health.url"),
+    profile: join(tunnel, "profiles", "orca-dots-bridge.yaml"),
+    healthUrl: join(tunnel, "orca-dots-bridge-health.url"),
     tunnelClientDir: join(root, "tunnel-client", `v${tunnelClientRelease.version}`),
     relayConfig: join(home, ".config", "orca-agent-status-relay", "config.json"),
-    launchAgent: join(home, "Library", "LaunchAgents", `${launchAgentLabel}.plist`),
-    notificationServiceAgent: join(
-      home,
-      "Library",
-      "LaunchAgents",
-      `${notificationServiceLabel}.plist`,
-    ),
-    notificationTunnelAgent: join(
-      home,
-      "Library",
-      "LaunchAgents",
-      `${notificationTunnelLabel}.plist`,
-    ),
+    serviceAgent: agent(serviceLabel),
+    tunnelAgent: agent(tunnelLabel),
+    serviceLastError: join(root, "notifications", "last-error"),
+    legacy: {
+      statusProfile: join(tunnel, "profiles", "orca-status.yaml"),
+      notificationProfile: join(tunnel, "profiles", "orca-notifications.yaml"),
+      statusHealthUrl: join(tunnel, "orca-status-health.url"),
+      notificationHealthUrl: join(tunnel, "orca-notifications-health.url"),
+      statusTunnelAgent: agent(legacyLabels.statusTunnel),
+      serviceAgent: agent(legacyLabels.service),
+      notificationTunnelAgent: agent(legacyLabels.notificationTunnel),
+    },
   };
 }
 export type SetupPaths = ReturnType<typeof setupPaths>;
 
 export type Settings = {
-  statusTunnelId?: string;
-  notificationTunnelId?: string;
+  /** The one Tunnel (read from the earlier `statusTunnelId` when missing). */
+  tunnelId?: string;
   relayPort: number;
-  /** Extra MCP Events callback hosts for the notification service (edited by hand). */
+  /** Extra MCP Events callback hosts for the bridge service (edited by hand). */
   notificationCallbackHosts?: string[];
 };
 export type StepStatus = "ok" | "created" | "updated" | "skipped" | "action" | "error";
@@ -116,17 +122,15 @@ export type SetupIo = {
 
 export type SetupOptions = {
   mode: "setup" | "doctor";
-  statusTunnelId?: string;
-  notificationTunnelId?: string;
+  tunnelId?: string;
   relayPort?: number;
   runtimeKey?: string;
   /** Rotate an existing runtime key instead of refusing a different one. */
   replaceRuntimeKey?: boolean;
   installTunnelClient?: boolean;
+  /** Keep the bridge service and its Tunnel running (LaunchAgents); also migrates the old layout. */
   installAgent?: boolean;
-  /** Keep the notification service and the notification Tunnel running (LaunchAgents). */
-  installNotifications?: boolean;
-  /** Node binary for the status Tunnel, used instead of one recorded in the profile. */
+  /** Node binary for the bridge service, used instead of one recorded in its LaunchAgent. */
   nodePath?: string;
 };
 
@@ -137,32 +141,6 @@ function plainPath(path: string) {
   // The MCP command is a single string that tunnel-client splits on spaces.
   if (/\s/.test(path)) throw new Error("path_with_whitespace_unsupported");
   return path;
-}
-
-/** The status-only bridge command, run with a clean environment so no key is inherited. */
-export function statusMcpCommand(input: {
-  home: string;
-  nodePath: string;
-  distDir: string;
-  orcaBin: string;
-}) {
-  const orca = plainPath(input.orcaBin);
-  return [
-    "/usr/bin/env -i",
-    `HOME=${plainPath(input.home)}`,
-    `PATH=/usr/bin:/bin:${dirname(orca)}`,
-    `ORCA_BIN=${orca}`,
-    "ORCA_ENVIRONMENT=",
-    "ORCA_PAIRING_CODE=",
-    // Status plus one-target send; send stays refused until the ChatGPT setting allows it.
-    "ORCA_BRIDGE_TOOLSET=status-send",
-    "ORCA_BRIDGE_ENABLE_SEND=1",
-    "ORCA_BRIDGE_CHATGPT_SETTINGS=1",
-    // Lets the menu bar app's Electron binary act as Node; real Node ignores it.
-    "ELECTRON_RUN_AS_NODE=1",
-    plainPath(input.nodePath),
-    plainPath(join(input.distDir, "mcp.mjs")),
-  ].join(" ");
 }
 
 function profileHeader(tunnelId: string, runtimeKey: string, healthUrlFile: string) {
@@ -185,20 +163,21 @@ function profileHeader(tunnelId: string, runtimeKey: string, healthUrlFile: stri
   ];
 }
 
-export function renderStatusProfile(paths: SetupPaths, tunnelId: string, command: string) {
-  return [
-    ...profileHeader(tunnelId, paths.runtimeKey, paths.statusHealthUrl),
-    "  commands:",
-    "    - channel: main",
-    `      command: ${yaml(command)}`,
-    "",
-  ].join("\n");
-}
-
-/** The Node binary a managed status profile runs, if the file is one this command wrote. */
-export function recordedNodePath(profile: string | undefined) {
-  if (!profile?.includes(managedMarker)) return undefined;
-  const line = profile.split("\n").find((l) => l.trimStart().startsWith("command: "));
+/**
+ * The Node binary a managed file runs, if it is one this command wrote: the bridge
+ * service LaunchAgent, or a status profile of the earlier layout.
+ */
+export function recordedNodePath(text: string | undefined) {
+  if (!text?.includes("managed by orca-dots-bridge setup")) return undefined;
+  if (text.includes("<plist")) {
+    const args = /<key>ProgramArguments<\/key>\s*<array>([\s\S]*?)<\/array>/.exec(text)?.[1];
+    const strings = [...(args ?? "").matchAll(/<string>([^<]*)<\/string>/g)].map((m) =>
+      m[1]!.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&"),
+    );
+    const node = strings[strings.length - 2];
+    return node?.startsWith("/") ? node : undefined;
+  }
+  const line = text.split("\n").find((l) => l.trimStart().startsWith("command: "));
   if (!line) return undefined;
   let command: unknown;
   try {
@@ -212,12 +191,13 @@ export function recordedNodePath(profile: string | undefined) {
   return node?.startsWith("/") ? node : undefined;
 }
 
-export function renderNotificationProfile(paths: SetupPaths, tunnelId: string) {
+/** The one Tunnel: forwards to the bridge service with the service Bearer from a file. */
+export function renderProfile(paths: SetupPaths, tunnelId: string) {
   return [
-    ...profileHeader(tunnelId, paths.runtimeKey, paths.notificationHealthUrl),
+    ...profileHeader(tunnelId, paths.runtimeKey, paths.healthUrl),
     "  server_urls:",
     "    - channel: main",
-    `      url: "http://127.0.0.1:${notificationPort}/mcp"`,
+    `      url: "http://127.0.0.1:${servicePort}/mcp"`,
     "  extra_headers:",
     `    Authorization: ${yaml(`file:${paths.serviceAuthorization}`)}`,
     "",
@@ -228,30 +208,29 @@ export function renderLaunchAgent(input: {
   home: string;
   tunnelClient: string;
   profile: string;
-  label?: string;
+  label: string;
   /** Start only once this local port accepts connections (tunnel-client checks its target once). */
   waitForPort?: number;
 }) {
   const run = [input.tunnelClient, "run", "--profile-file", input.profile];
-  if (input.waitForPort === undefined)
-    return renderAgentPlist(input.label ?? launchAgentLabel, input.home, run);
+  if (input.waitForPort === undefined) return renderAgentPlist(input.label, input.home, run);
   const quoted = run.map((arg) => `'${arg.replace(/'/g, "'\\''")}'`).join(" ");
-  return renderAgentPlist(input.label ?? launchAgentLabel, input.home, [
+  return renderAgentPlist(input.label, input.home, [
     "/bin/sh",
     "-c",
     `until /usr/bin/nc -z 127.0.0.1 ${input.waitForPort}; do sleep 1; done; exec ${quoted}`,
   ]);
 }
 
-/** The always-on notification service, with the same clean environment as the status MCP. */
-export function renderNotificationServiceAgent(input: {
+/** The always-on bridge service, started from an empty environment so no key is inherited. */
+export function renderServiceAgent(input: {
   home: string;
   nodePath: string;
   distDir: string;
   orcaBin: string;
 }) {
   const orca = plainPath(input.orcaBin);
-  return renderAgentPlist(notificationServiceLabel, input.home, [
+  return renderAgentPlist(serviceLabel, input.home, [
     "/usr/bin/env",
     "-i",
     `HOME=${plainPath(input.home)}`,
@@ -261,7 +240,7 @@ export function renderNotificationServiceAgent(input: {
     "ORCA_PAIRING_CODE=",
     "ELECTRON_RUN_AS_NODE=1",
     plainPath(input.nodePath),
-    plainPath(join(input.distDir, "notification-service.mjs")),
+    plainPath(join(input.distDir, "bridge-service.mjs")),
   ]);
 }
 
@@ -353,13 +332,15 @@ async function resolveTunnelClient(io: SetupIo, paths: SetupPaths) {
 async function loadSettings(paths: SetupPaths): Promise<Settings> {
   const text = await readText(paths.settings);
   if (!text) return { relayPort: 8788 };
-  const parsed = JSON.parse(text) as Partial<Settings>;
+  const parsed = JSON.parse(text) as Partial<Settings> & { statusTunnelId?: unknown };
   return {
     relayPort: typeof parsed.relayPort === "number" ? parsed.relayPort : 8788,
-    ...(typeof parsed.statusTunnelId === "string" ? { statusTunnelId: parsed.statusTunnelId } : {}),
-    ...(typeof parsed.notificationTunnelId === "string"
-      ? { notificationTunnelId: parsed.notificationTunnelId }
-      : {}),
+    // The earlier layout's status Tunnel becomes the one Tunnel; its notification Tunnel is dropped.
+    ...(typeof parsed.tunnelId === "string"
+      ? { tunnelId: parsed.tunnelId }
+      : typeof parsed.statusTunnelId === "string"
+        ? { tunnelId: parsed.statusTunnelId }
+        : {}),
     ...(Array.isArray(parsed.notificationCallbackHosts) &&
     parsed.notificationCallbackHosts.every(
       (h) => typeof h === "string" && /^[a-z0-9.-]{1,253}$/.test(h),
@@ -459,13 +440,9 @@ export async function runSetup(
   const next: Settings = { ...settings, relayPort };
   if (!Number.isInteger(relayPort) || relayPort < 1024 || relayPort > 65535)
     add("settings", "error", "invalid_relay_port");
-  for (const [key, value] of [
-    ["statusTunnelId", options.statusTunnelId],
-    ["notificationTunnelId", options.notificationTunnelId],
-  ] as const) {
-    if (value === undefined) continue;
-    if (tunnelIdPattern.test(value)) next[key] = value;
-    else add("settings", "error", `invalid_${key}`);
+  if (options.tunnelId !== undefined) {
+    if (tunnelIdPattern.test(options.tunnelId)) next.tunnelId = options.tunnelId;
+    else add("settings", "error", "invalid_tunnelId");
   }
   if (steps.length > 0) return { steps, settings };
 
@@ -634,203 +611,246 @@ export async function runSetup(
       writeOwnerOnly(paths.settings, `${JSON.stringify(next, null, 2)}\n`, "w"),
     );
 
-  let statusNode: string | undefined;
-  await attempt("status-profile", async () => {
-    if (!next.statusTunnelId)
-      return add("status-profile", "action", `pass --status-tunnel-id (see ${setupUrls.tunnels})`);
-    if (!orcaBin) return add("status-profile", "action", "needs the Orca CLI");
-    // The CLI and the app may see the same Node under different paths; keeping a
-    // recorded one that still runs avoids rewriting the profile and restarting the Tunnel.
-    // An explicit Node (options.nodePath) always wins.
-    const recorded = options.nodePath
-      ? undefined
-      : recordedNodePath(await readText(paths.statusProfile));
-    const nodePath =
-      recorded && (await supportedNode(io, recorded))
-        ? recorded
-        : (options.nodePath ?? io.nodePath);
-    statusNode = nodePath;
-    const command = statusMcpCommand({ home: io.home, nodePath, distDir: io.distDir, orcaBin });
-    await managedStep(
-      "status-profile",
-      paths.statusProfile,
-      renderStatusProfile(paths, next.statusTunnelId, command),
-    );
-  });
-  await attempt("notification-profile", async () => {
-    if (!next.notificationTunnelId)
-      return add(
-        "notification-profile",
-        "skipped",
-        "pass --notification-tunnel-id to prepare notifications",
-      );
-    await managedStep(
-      "notification-profile",
-      paths.notificationProfile,
-      renderNotificationProfile(paths, next.notificationTunnelId),
-    );
+  await attempt("profile", async () => {
+    if (!next.tunnelId)
+      return add("profile", "action", `pass --tunnel-id (see ${setupUrls.tunnels})`);
+    await managedStep("profile", paths.profile, renderProfile(paths, next.tunnelId));
   });
 
-  const statusReady = ready("status-profile") && ready("runtime-key") && ready("tunnel-client");
-  await attempt("status-doctor", async () => {
-    if (!statusReady || !tunnelClient) return add("status-doctor", "skipped", "profile not ready");
-    const result = await io.exec(tunnelClient, ["doctor", "--profile-file", paths.statusProfile]);
-    add(
-      "status-doctor",
-      result.code === 0 ? "ok" : "error",
-      result.code === 0 ? "tunnel-client doctor passed" : "tunnel_client_doctor_failed",
-    );
-  });
+  const launchctl = (args: string[]) => io.exec("/bin/launchctl", args);
+  const isLoaded = async (label: string) =>
+    (await launchctl(["print", `gui/${io.uid}/${label}`])).code === 0;
+  /** bootstrap right after bootout fails while the old job is still unloading. */
+  const bootout = async (target: string) => {
+    await launchctl(["bootout", target]);
+    for (let i = 0; i < 20; i++) {
+      if ((await launchctl(["print", target])).code !== 0) break;
+      await io.sleep(250);
+    }
+  };
+  const serviceListening = async () =>
+    // The service answers OAuth discovery with 404 once it listens.
+    (await io
+      .probe(`http://127.0.0.1:${servicePort}/.well-known/oauth-protected-resource`)
+      .catch(() => 0)) === 404;
+  const migrate = write && options.installAgent === true;
 
-  // LaunchAgent keeps the status Tunnel running across logins and crashes.
+  /**
+   * Retires one LaunchAgent of the earlier two-Tunnel layout: boots it out and removes
+   * its plist when this command wrote it. Absent agents add no step. Without
+   * `retire` (doctor, or not ready to replace it yet) it is only reported.
+   */
+  const retireAgent = (step: string, label: string, plistPath: string, retire: boolean) =>
+    attempt(step, async () => {
+      const target = `gui/${io.uid}/${label}`;
+      const loaded = await isLoaded(label);
+      const plist = await readText(plistPath);
+      if (!loaded && plist === undefined) return;
+      const managed = plist?.includes(agentMarker) === true;
+      if (!retire)
+        return add(
+          step,
+          "action",
+          `${label} is ${loaded ? "still loaded" : "installed"} (rerun with --install-agent to move to the single Tunnel)`,
+        );
+      if (loaded) await bootout(target);
+      if (plist !== undefined && !managed)
+        return add(step, "action", `unmanaged_file_kept (remove ${plistPath})`);
+      if (managed) await unlink(plistPath).catch(() => undefined);
+      add(step, "updated", `removed ${label}`);
+    });
+
   /** Installs or refreshes one LaunchAgent; restarts it only when what it reads changed. */
   const agentStep = (input: {
     step: string;
     label: string;
     plistPath: string;
-    wanted: boolean | undefined;
     hint: string;
     notReady: string | undefined;
     plist: () => string;
     inputs: string[];
-    /** For a loaded agent: returns a problem when it is loaded but not doing its job. */
+    /** Returns a problem while the loaded agent is not doing its job (waited for after a start). */
     check?: () => Promise<string | undefined>;
   }) =>
     attempt(input.step, async () => {
       const target = `gui/${io.uid}/${input.label}`;
-      const loaded = (await io.exec("/bin/launchctl", ["print", target])).code === 0;
-      if (!write || !input.wanted) {
+      const loaded = await isLoaded(input.label);
+      if (!migrate) {
         const problem = loaded ? await input.check?.() : undefined;
         if (problem) return add(input.step, "error", problem);
+        // An app update moves the runtime; a plist still pointing at the old one needs setup again.
+        if (loaded && !input.notReady && (await readText(input.plistPath)) !== input.plist())
+          return add(input.step, "action", "outdated (rerun with --install-agent)");
         return add(input.step, loaded ? "ok" : "skipped", loaded ? target : input.hint);
       }
       if (input.notReady) return add(input.step, "action", input.notReady);
-      const status = await writeManaged(
-        input.plistPath,
-        input.plist(),
-        "managed by orca-dots-bridge setup",
-      );
+      const status = await writeManaged(input.plistPath, input.plist(), agentMarker);
       const inputsChanged = steps.some(
         (s) => input.inputs.includes(s.step) && ["created", "updated"].includes(s.status),
       );
+      let result: { status: StepStatus; detail: string };
       if (status === "ok" && loaded) {
         // Same plist: restart only when what the running process reads has changed.
-        if (!inputsChanged) return add(input.step, "ok", target);
-        const kick = await io.exec("/bin/launchctl", ["kickstart", "-k", target]);
-        return add(
-          input.step,
-          kick.code === 0 ? "updated" : "error",
-          kick.code === 0 ? `${target} restarted` : "launchctl_kickstart_failed",
-        );
-      }
-      if (loaded) {
-        await io.exec("/bin/launchctl", ["bootout", target]);
-        // bootstrap right after bootout fails while the old job is still unloading.
-        for (let i = 0; i < 20; i++) {
-          if ((await io.exec("/bin/launchctl", ["print", target])).code !== 0) break;
-          await io.sleep(250);
+        if (!inputsChanged) result = { status: "ok", detail: target };
+        else {
+          const kick = await launchctl(["kickstart", "-k", target]);
+          if (kick.code !== 0) return add(input.step, "error", "launchctl_kickstart_failed");
+          result = { status: "updated", detail: `${target} restarted` };
         }
+      } else {
+        if (loaded) await bootout(target);
+        let boot: ExecResult = { code: -1, stdout: "" };
+        for (let i = 0; i < 3 && boot.code !== 0; i++) {
+          if (i > 0) await io.sleep(1000);
+          boot = await launchctl(["bootstrap", `gui/${io.uid}`, input.plistPath]);
+        }
+        if (boot.code !== 0) return add(input.step, "error", "launchctl_bootstrap_failed");
+        result = { status: loaded ? "updated" : "created", detail: target };
       }
-      let boot: ExecResult = { code: -1, stdout: "" };
-      for (let i = 0; i < 3 && boot.code !== 0; i++) {
-        if (i > 0) await io.sleep(1000);
-        boot = await io.exec("/bin/launchctl", ["bootstrap", `gui/${io.uid}`, input.plistPath]);
+      if (input.check) {
+        let problem = await input.check();
+        for (let i = 0; i < 20 && problem; i++) {
+          await io.sleep(500);
+          problem = await input.check();
+        }
+        if (problem) return add(input.step, "error", problem);
       }
-      add(
-        input.step,
-        boot.code === 0 ? (loaded ? "updated" : "created") : "error",
-        boot.code === 0 ? target : "launchctl_bootstrap_failed",
-      );
+      add(input.step, result.status, result.detail);
     });
 
+  // The bridge service: every tool and the notifications behind the one Tunnel. The
+  // Node it runs is kept while it still works (the CLI and the app may see the same
+  // Node under different paths); an explicit Node (options.nodePath) always wins.
+  let serviceNode = options.nodePath ?? io.nodePath;
+  if (!options.nodePath) {
+    const recorded =
+      recordedNodePath(await readText(paths.serviceAgent)) ??
+      recordedNodePath(await readText(paths.legacy.serviceAgent)) ??
+      recordedNodePath(await readText(paths.legacy.statusProfile));
+    if (recorded && (await supportedNode(io, recorded))) serviceNode = recorded;
+  }
+  const serviceNotReady =
+    !ready("trial-keys") || !ready("relay") || !orcaBin
+      ? "needs the service keys, the relay plugin config and the Orca CLI"
+      : undefined;
+  // The earlier notification service holds the same port, so it goes first.
+  await retireAgent(
+    "legacy-service",
+    legacyLabels.service,
+    paths.legacy.serviceAgent,
+    migrate && !serviceNotReady,
+  );
   await agentStep({
-    step: "launch-agent",
-    label: launchAgentLabel,
-    plistPath: paths.launchAgent,
-    wanted: options.installAgent,
-    hint: "rerun with --install-agent to start at login",
-    notReady:
-      !statusReady || !tunnelClient || !ready("status-doctor")
-        ? "status Tunnel not ready"
-        : undefined,
+    step: "service",
+    label: serviceLabel,
+    plistPath: paths.serviceAgent,
+    hint: "rerun with --install-agent to keep the bridge service running",
+    notReady: serviceNotReady,
     plist: () =>
-      renderLaunchAgent({
+      renderServiceAgent({
         home: io.home,
-        tunnelClient: tunnelClient!,
-        profile: paths.statusProfile,
-      }),
-    inputs: ["status-profile", "runtime-key", "tunnel-client"],
-  });
-
-  await attempt("status-tunnel", async () => {
-    const base = (await readText(paths.statusHealthUrl))?.trim();
-    const code = base ? await io.probe(`${base.replace(/\/$/, "")}/readyz`).catch(() => 0) : 0;
-    if (code === 200) add("status-tunnel", "ok", "ready");
-    else add("status-tunnel", "skipped", "not running");
-  });
-
-  // Notifications: the service (MCP Events + relay listener) and its Tunnel, both always on.
-  await agentStep({
-    step: "notification-service",
-    label: notificationServiceLabel,
-    plistPath: paths.notificationServiceAgent,
-    wanted: options.installNotifications,
-    hint: "rerun with --install-notifications to keep notifications running",
-    notReady:
-      !ready("trial-keys") || !ready("relay") || !orcaBin
-        ? "needs the notification keys, the relay plugin config and the Orca CLI"
-        : undefined,
-    plist: () =>
-      renderNotificationServiceAgent({
-        home: io.home,
-        nodePath: statusNode ?? options.nodePath ?? io.nodePath,
+        nodePath: serviceNode,
         distDir: io.distDir,
         orcaBin: orcaBin!,
       }),
     inputs: ["trial-keys", "relay"],
-    // The service answers OAuth discovery with 404 once it listens.
     check: async () => {
-      const code = await io
-        .probe(`http://127.0.0.1:${notificationPort}/.well-known/oauth-protected-resource`)
-        .catch(() => 0);
-      if (code === 404) return undefined;
-      const reason = (await readText(join(paths.root, "notifications", "last-error")))?.trim();
-      return `not listening on ${notificationPort}${reason ? ` (${reason})` : ""}`;
+      if (await serviceListening()) return undefined;
+      const reason = (await readText(paths.serviceLastError))?.trim();
+      return `not listening on ${servicePort}${reason ? ` (${reason})` : ""}`;
     },
   });
+
+  const profileReady = ready("profile") && ready("runtime-key") && Boolean(tunnelClient);
+  await attempt("profile-doctor", async () => {
+    if (!profileReady || !tunnelClient)
+      return add("profile-doctor", "skipped", "profile not ready");
+    // The profile forwards to the service, so it is checked only while the service listens.
+    if (!(await serviceListening()))
+      return add("profile-doctor", "skipped", "bridge service not running");
+    const result = await io.exec(tunnelClient, ["doctor", "--profile-file", paths.profile]);
+    add(
+      "profile-doctor",
+      result.code === 0 ? "ok" : "error",
+      result.code === 0 ? "tunnel-client doctor passed" : "tunnel_client_doctor_failed",
+    );
+  });
+
+  const tunnelNotReady = !profileReady
+    ? "needs --tunnel-id, the runtime key and tunnel-client"
+    : steps.some((s) => s.step === "profile-doctor" && s.status === "error")
+      ? "tunnel-client doctor failed"
+      : migrate && !ready("service")
+        ? "bridge service not running"
+        : undefined;
+  // The earlier status Tunnel usually serves the same Tunnel ID; never run two clients on one.
+  await retireAgent(
+    "legacy-status-tunnel",
+    legacyLabels.statusTunnel,
+    paths.legacy.statusTunnelAgent,
+    migrate && !tunnelNotReady,
+  );
   await agentStep({
-    step: "notification-tunnel-agent",
-    label: notificationTunnelLabel,
-    plistPath: paths.notificationTunnelAgent,
-    wanted: options.installNotifications,
-    hint: "rerun with --install-notifications to keep notifications running",
-    notReady:
-      !ready("notification-profile") || !ready("runtime-key") || !tunnelClient
-        ? "needs --notification-tunnel-id, the runtime key and tunnel-client"
-        : undefined,
+    step: "tunnel-agent",
+    label: tunnelLabel,
+    plistPath: paths.tunnelAgent,
+    hint: "rerun with --install-agent to start at login",
+    notReady: tunnelNotReady,
     plist: () =>
       renderLaunchAgent({
         home: io.home,
         tunnelClient: tunnelClient!,
-        profile: paths.notificationProfile,
-        label: notificationTunnelLabel,
-        // Both agents start together at login; the service must be listening first.
-        waitForPort: notificationPort,
+        profile: paths.profile,
+        label: tunnelLabel,
+        // Both agents start together at login; tunnel-client checks its target once.
+        waitForPort: servicePort,
       }),
-    inputs: ["notification-profile", "runtime-key", "tunnel-client", "service-authorization"],
+    inputs: ["profile", "runtime-key", "tunnel-client", "service-authorization"],
   });
-  await attempt("notification-tunnel", async () => {
-    if (!next.notificationTunnelId) return add("notification-tunnel", "skipped", "not configured");
-    // The Tunnel checks its forward target on start; give the service a moment first.
+
+  await attempt("tunnel", async () => {
+    if (!next.tunnelId) return add("tunnel", "skipped", "not configured");
+    // A freshly started Tunnel takes a moment to report ready.
     let code = 0;
-    for (let i = 0; i < (write && options.installNotifications ? 20 : 1); i++) {
-      const base = (await readText(paths.notificationHealthUrl))?.trim();
+    for (let i = 0; i < (migrate && ready("tunnel-agent") ? 20 : 1); i++) {
+      if (i > 0) await io.sleep(500);
+      const base = (await readText(paths.healthUrl))?.trim();
       code = base ? await io.probe(`${base.replace(/\/$/, "")}/readyz`).catch(() => 0) : 0;
       if (code === 200) break;
-      await io.sleep(500);
     }
-    if (code === 200) add("notification-tunnel", "ok", "ready");
-    else add("notification-tunnel", "skipped", "not running");
+    if (code === 200) add("tunnel", "ok", "ready");
+    else add("tunnel", "skipped", "not running");
+  });
+
+  // The rest of the earlier layout goes only once the one Tunnel is in place.
+  const replaced = migrate && ready("tunnel-agent");
+  await retireAgent(
+    "legacy-notification-tunnel",
+    legacyLabels.notificationTunnel,
+    paths.legacy.notificationTunnelAgent,
+    replaced,
+  );
+  await attempt("legacy-profiles", async () => {
+    const found: string[] = [];
+    for (const [profile, healthUrl] of [
+      [paths.legacy.statusProfile, paths.legacy.statusHealthUrl],
+      [paths.legacy.notificationProfile, paths.legacy.notificationHealthUrl],
+    ] as const) {
+      // A profile this command did not write stays, and so does its health file.
+      if (!(await readText(profile))?.includes(managedMarker)) continue;
+      found.push(profile);
+      if (!replaced) continue;
+      await unlink(profile);
+      await unlink(healthUrl).catch(() => undefined);
+    }
+    if (found.length === 0) return;
+    if (replaced) add("legacy-profiles", "updated", `removed ${found.join(", ")}`);
+    else
+      add(
+        "legacy-profiles",
+        "action",
+        `${found.join(", ")} remain (rerun with --install-agent to move to the single Tunnel)`,
+      );
   });
   return { steps, settings: next };
 }
@@ -839,21 +859,28 @@ export async function runSetup(
 export function nextActions(steps: Step[], settings: Partial<Settings>) {
   const status = (name: string) => steps.find((s) => s.step === name)?.status;
   const actions: string[] = [];
+  const migrated = steps.some((s) => s.step.startsWith("legacy-") && s.status === "updated");
   if (status("runtime-key") === "action")
     actions.push(
       `Create a runtime key at ${setupUrls.apiKeys} (Restricted, Tunnels: Read + Use, with an expiry such as 90 days), copy it, then run: pbpaste | node dist/setup.mjs --runtime-key-stdin && pbcopy < /dev/null`,
     );
-  if (status("status-profile") === "action" && !settings.statusTunnelId)
+  if (status("profile") === "action" && !settings.tunnelId)
+    actions.push(`Copy the Tunnel ID from ${setupUrls.tunnels} and rerun with --tunnel-id <id>`);
+  if (steps.some((s) => s.step.startsWith("legacy-") && s.status === "action"))
     actions.push(
-      `Copy the status Tunnel ID from ${setupUrls.tunnels} and rerun with --status-tunnel-id <id>`,
+      "Parts of the earlier two-Tunnel setup remain: rerun with --install-agent (or press セットアップを実行 in the menu bar app) to move to the single Tunnel.",
     );
-  if (status("status-tunnel") === "ok" && settings.statusTunnelId)
+  if (status("tunnel") === "ok" && settings.tunnelId && !migrated)
     actions.push(
-      `If not done yet, add the plugin once at ${setupUrls.connectors}: custom MCP server, connection type Tunnel (${settings.statusTunnelId}), authentication none`,
+      `If not done yet, add the plugin once at ${setupUrls.connectors}: custom MCP server, connection type Tunnel (${settings.tunnelId}), authentication none`,
     );
-  if (["created", "updated"].includes(status("status-profile") ?? "") && settings.statusTunnelId)
+  if ((["created", "updated"].includes(status("profile") ?? "") || migrated) && settings.tunnelId)
     actions.push(
-      "The plugin's tools changed: in ChatGPT open the plugin's manage page and press ツールを更新 once. Sending stays off until you turn on 指示の送信を許可 in the plugin settings there.",
+      "The plugin's tools changed: in ChatGPT open the plugin's manage page and press ツールを更新 once. Sending stays off until you turn on 指示の送信を許可, and notifications until you turn on 通知を受け取る, in the plugin settings there.",
+    );
+  if (migrated)
+    actions.push(
+      "This Mac now uses one Tunnel and one plugin. If you added a separate notifications plugin in ChatGPT, delete it; the old notification Tunnel on Platform can be deleted too. Ask dot to subscribe to notifications again.",
     );
   return actions;
 }
@@ -915,11 +942,12 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
-const usage = `Usage: setup [doctor] [--status-tunnel-id ID] [--notification-tunnel-id ID] [--relay-port PORT]
+const usage = `Usage: setup [doctor] [--tunnel-id ID] [--relay-port PORT]
              [--runtime-key-stdin [--replace-runtime-key]] [--install-tunnel-client]
-             [--install-agent] [--install-notifications] [--json]
-Prepares this Mac for dot: notification keys, relay plugin config, tunnel-client, Tunnel profiles
-and an optional LaunchAgent for the status Tunnel. "doctor" only checks. Never prints secrets.
+             [--install-agent] [--json]
+Prepares this Mac for dot: service keys, relay plugin config, tunnel-client, the Tunnel profile
+and LaunchAgents for the bridge service and its Tunnel (--install-agent, which also moves an
+earlier two-Tunnel setup to the single Tunnel). "doctor" only checks. Never prints secrets.
 `;
 
 export function parseSetupArgs(args: string[]) {
@@ -932,14 +960,13 @@ export function parseSetupArgs(args: string[]) {
       return next;
     };
     if (i === 0 && arg === "doctor") options.mode = "doctor";
-    else if (arg === "--status-tunnel-id") options.statusTunnelId = value();
-    else if (arg === "--notification-tunnel-id") options.notificationTunnelId = value();
+    // --status-tunnel-id is the earlier name, kept so existing commands still work.
+    else if (arg === "--tunnel-id" || arg === "--status-tunnel-id") options.tunnelId = value();
     else if (arg === "--relay-port") options.relayPort = Number(value());
     else if (arg === "--runtime-key-stdin") options.runtimeKeyStdin = true;
     else if (arg === "--replace-runtime-key") options.replaceRuntimeKey = true;
     else if (arg === "--install-tunnel-client") options.installTunnelClient = true;
     else if (arg === "--install-agent") options.installAgent = true;
-    else if (arg === "--install-notifications") options.installNotifications = true;
     else if (arg === "--json") options.json = true;
     else throw new Error("unknown_argument");
   }
@@ -948,7 +975,6 @@ export function parseSetupArgs(args: string[]) {
     (options.runtimeKeyStdin ||
       options.replaceRuntimeKey ||
       options.installAgent ||
-      options.installNotifications ||
       options.installTunnelClient)
   )
     throw new Error("doctor_is_read_only");
@@ -993,7 +1019,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       process.stdout.write(`${JSON.stringify({ steps, nextActions: actions }, null, 2)}\n`);
     else {
       for (const s of steps)
-        process.stdout.write(`[${marks[s.status].padEnd(7)}] ${s.step.padEnd(22)} ${s.detail}\n`);
+        process.stdout.write(`[${marks[s.status].padEnd(7)}] ${s.step.padEnd(26)} ${s.detail}\n`);
       if (actions.length > 0)
         process.stdout.write(`\nNext:\n${actions.map((a) => `- ${a}`).join("\n")}\n`);
     }

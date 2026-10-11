@@ -4,7 +4,9 @@ import { tmpdir } from "node:os";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vite-plus/test";
-import { serviceCatalog, startNotificationService } from "../src/events/notification-service.js";
+import { OrcaAdapter } from "../src/adapter.js";
+import { serviceCatalog, startBridgeService } from "../src/events/bridge-service.js";
+import { Bridge } from "../src/service.js";
 import type { KeyAccount } from "../src/events/keychain.js";
 import type { PaneTarget } from "../src/events/pane-contract.js";
 
@@ -43,14 +45,66 @@ afterEach(async () => {
   for (const s of running.splice(0)) await s.close();
 });
 
-async function fixture(options: { enabled: boolean; describe?: () => Promise<PaneTarget> }) {
+/** A stand-in Orca CLI: one writable agent terminal, and receipts for sends. */
+function fakeOrca() {
+  const calls: string[][] = [];
+  const terminal = {
+    handle: "term_1",
+    worktreeId: "wt_1",
+    tabId: "tab_1",
+    leafId: "leaf_1",
+    connected: true,
+    writable: true,
+    agentIdentity: "codex",
+  };
+  const bridge = new Bridge(
+    new OrcaAdapter(async (args) => {
+      calls.push(args);
+      const result =
+        args[0] === "worktree"
+          ? { worktrees: [], totalCount: 0, truncated: false }
+          : args[1] === "list"
+            ? { terminals: [], totalCount: 0, truncated: false }
+            : args[1] === "show"
+              ? { terminal }
+              : {
+                  send: {
+                    handle: "term_1",
+                    accepted: true,
+                    bytesWritten: 2,
+                    prompt: {
+                      requestId: "synthetic-request",
+                      stages: ["input_accepted"],
+                      provider: "codex",
+                      observation: "supported",
+                    },
+                  },
+                };
+      return JSON.stringify({ ok: true, result });
+    }),
+  );
+  return { bridge, calls };
+}
+
+async function fixture(options: {
+  enabled: boolean;
+  sendEnabled?: boolean;
+  describe?: () => Promise<PaneTarget>;
+  bridge?: Bridge;
+}) {
   const dir = await realpath(await mkdtemp(join(tmpdir(), "notify-service-")));
   const settingsPath = join(dir, "chatgpt-settings.json");
-  await writeFile(settingsPath, JSON.stringify({ notificationsEnabled: options.enabled }));
+  await writeFile(
+    settingsPath,
+    JSON.stringify({
+      notificationsEnabled: options.enabled,
+      sendEnabled: options.sendEnabled === true,
+    }),
+  );
   const posts: { url: string; body: any }[] = [];
   const ports = { port: await freePort(), relayPort: await freePort() };
   const start = () =>
-    startNotificationService({
+    startBridgeService({
       directory: join(dir, "notifications"),
       settingsPath,
       ...ports,
@@ -68,11 +122,16 @@ async function fixture(options: { enabled: boolean; describe?: () => Promise<Pan
         };
       },
       sweepMs: 50,
+      ...(options.bridge ? { bridge: options.bridge } : {}),
     }).then((s) => {
       running.push(s);
       return s;
     });
-  const mcp = async (method: string, params: Record<string, unknown> = {}) => {
+  const mcp = async (
+    method: string,
+    params: Record<string, unknown> = {},
+    meta: Record<string, unknown> = {},
+  ) => {
     const response = await fetch(`http://127.0.0.1:${ports.port}/mcp`, {
       method: "POST",
       headers: {
@@ -92,6 +151,7 @@ async function fixture(options: { enabled: boolean; describe?: () => Promise<Pan
           _meta: {
             "io.modelcontextprotocol/protocolVersion": "2026-07-28",
             "io.modelcontextprotocol/clientCapabilities": {},
+            ...meta,
           },
         },
       }),
@@ -333,7 +393,7 @@ it("lets dot read what it was notified about with orca_recent_notifications", as
   const f = await fixture({ enabled: true });
   await f.start();
   const listed = await f.mcp("tools/list");
-  expect(listed.result.tools.map((t: any) => t.name)).toEqual(["orca_recent_notifications"]);
+  expect(listed.result.tools.map((t: any) => t.name)).toContain("orca_recent_notifications");
   const empty = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
   expect(empty.result.structuredContent).toEqual({ notifications: [] });
 
@@ -354,4 +414,108 @@ it("lets dot read what it was notified about with orca_recent_notifications", as
   await writeFile(f.settingsPath, JSON.stringify({ notificationsEnabled: false }));
   const off = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
   expect(off.result.structuredContent).toEqual({ notifications: [] });
+});
+
+it("serves every tool of the one plugin and advertises the ChatGPT settings", async () => {
+  const f = await fixture({ enabled: false });
+  await f.start();
+  const listed = await f.mcp("tools/list");
+  const tools = Object.fromEntries(listed.result.tools.map((t: any) => [t.name, t]));
+  expect(Object.keys(tools)).toEqual([
+    "orca_status",
+    "orca_send_instruction",
+    "orca_settings_read",
+    "orca_settings_update",
+    "orca_recent_notifications",
+  ]);
+  expect(tools.orca_status.inputSchema.required).toEqual(["repo", "name"]);
+  // status-send shape: the expected worktree is required.
+  expect(tools.orca_send_instruction.inputSchema.required).toEqual([
+    "expectedWorktreeId",
+    "handle",
+    "text",
+  ]);
+  expect(tools.orca_send_instruction.annotations).toMatchObject({
+    readOnlyHint: false,
+    destructiveHint: true,
+  });
+  expect(tools.orca_settings_read.outputSchema.type).toBe("object");
+  const discovered = await f.mcp("server/discover");
+  const capability = { readTool: "orca_settings_read", updateTool: "orca_settings_update" };
+  expect(discovered.result.capabilities.extensions["openai/settings"]).toEqual(capability);
+  expect(discovered.result.capabilities.experimental["openai/settings"]).toEqual(capability);
+  expect(discovered.result.capabilities.events).toBeDefined();
+  const unknown = await f.mcp("tools/call", { name: "orca_nope", arguments: {} });
+  expect(unknown.error).toBeDefined();
+});
+
+it("answers orca_status through the Orca CLI and returns handler failures as tool errors", async () => {
+  const orca = fakeOrca();
+  const f = await fixture({ enabled: false, bridge: orca.bridge });
+  await f.start();
+  const reply = await f.mcp("tools/call", {
+    name: "orca_status",
+    arguments: { repo: "sample-repo", name: "review" },
+  });
+  expect(reply.error).toBeUndefined();
+  expect(orca.calls.some((c) => c[0] === "worktree")).toBe(true);
+  const invalid = await f.mcp("tools/call", { name: "orca_status", arguments: { repo: "" } });
+  expect(invalid.result.isError).toBe(true);
+  expect(JSON.parse(invalid.result.content[0].text).error.code).toBe("invalid_input");
+});
+
+it("refuses orca_send_instruction until 指示の送信を許可 is on", async () => {
+  const orca = fakeOrca();
+  const f = await fixture({ enabled: false, bridge: orca.bridge });
+  await f.start();
+  const send = {
+    name: "orca_send_instruction",
+    arguments: { handle: "term_1", text: "hi", expectedWorktreeId: "wt_1" },
+  };
+  const refused = await f.mcp("tools/call", send);
+  expect(refused.result.isError).toBe(true);
+  expect(JSON.parse(refused.result.content[0].text).error.code).toBe("send_disabled");
+  expect(orca.calls).toHaveLength(0);
+  // Without expectedWorktreeId the call is invalid even before the setting is read.
+  const loose = await f.mcp("tools/call", {
+    name: "orca_send_instruction",
+    arguments: { handle: "term_1", text: "hi" },
+  });
+  expect(JSON.parse(loose.result.content[0].text).error.code).toBe("invalid_input");
+
+  await writeFile(f.settingsPath, JSON.stringify({ sendEnabled: true }));
+  const sent = await f.mcp("tools/call", send);
+  expect(sent.result.isError).toBeUndefined();
+  expect(orca.calls.some((c) => c[1] === "send")).toBe(true);
+});
+
+it("turns settings on only from the ChatGPT settings page", async () => {
+  const f = await fixture({ enabled: false });
+  await f.start();
+  const update = (set: Record<string, boolean>, meta?: Record<string, unknown>) =>
+    f.mcp("tools/call", { name: "orca_settings_update", arguments: { set } }, meta);
+  const settings = async () => JSON.parse(await readFile(f.settingsPath, "utf8"));
+
+  for (const meta of [undefined, { "openai/session": "s", "openai/action_name": "x" }]) {
+    const chat = await update({ sendEnabled: true }, meta);
+    expect(chat.result.isError).toBe(true);
+    expect(JSON.parse(chat.result.content[0].text).error.code).toBe("settings_page_only");
+  }
+  expect((await settings()).sendEnabled).toBe(false);
+
+  const page = await update(
+    { sendEnabled: true, notificationsEnabled: true },
+    { "openai/action_name": "x" },
+  );
+  expect(page.result.structuredContent).toEqual({
+    values: { sendEnabled: true, notificationsEnabled: true },
+  });
+  const read = await f.mcp("tools/call", { name: "orca_settings_read", arguments: {} });
+  expect(read.result.structuredContent.values).toEqual({
+    sendEnabled: true,
+    notificationsEnabled: true,
+  });
+  // Turning something off is accepted from anywhere.
+  const off = await update({ notificationsEnabled: false });
+  expect(off.result.structuredContent.values.notificationsEnabled).toBe(false);
 });

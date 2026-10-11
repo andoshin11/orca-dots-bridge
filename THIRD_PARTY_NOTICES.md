@@ -62,6 +62,28 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
 
+## zod-to-json-schema 3.25.2
+
+ツールの入力スキーマ（zod）をJSON Schemaへ変換するために直接依存へ加えました（以前から`@modelcontextprotocol/sdk`経由で同梱されていたものと同じ版です）。以下はインストール済みパッケージのLICENSE本文です。
+
+```text
+ISC License
+
+Copyright (c) 2020, Stefan Terdell
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+```
+
 ## MCP v2 packages 2.3.1
 
 `@modelcontextprotocol/server`（runtime）と`@modelcontextprotocol/client`（test）はApache-2.0の宣言を持ち、同梱LICENSEはApache-2.0への移行と未移行のMIT contributionsの扱いを記載しています。`@modelcontextprotocol/core`も2.3.1です。各パッケージのLICENSEは依存を同梱する際に保持してください。今回追加した直接依存のLICENSE本文を以下に記載します（server/clientで同一）。

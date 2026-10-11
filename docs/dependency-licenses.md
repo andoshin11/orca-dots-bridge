@@ -20,11 +20,14 @@ package-lock.jsonの281依存エントリーにはライセンス宣言があり
 | ------------------------- | ---------- | ------------------------------------------------- |
 | @modelcontextprotocol/sdk | 1.32.0     | LICENSE: MIT                                      |
 | zod                       | 3.25.76    | LICENSE: MIT                                      |
+| zod-to-json-schema        | 3.25.2     | LICENSE: ISC                                      |
 | @types/node               | 22.19.15   | LICENSE: MIT                                      |
 | typescript                | 5.9.3      | LICENSE.txt: Apache-2.0、ThirdPartyNoticeText.txt |
 | vite-plus                 | 1.0.0      | LICENSE: 本体MIT、同梱依存MIT・ISC・BlueOak-1.0.0 |
 
 runtimeの推移依存にはMIT・ISCのほか、fast-uriとqsのBSD-3-Clause、json-schema-typedのBSD-2-Clauseが含まれます。build依存のlightningcssと対応するネイティブパッケージにはMPL-2.0本文がありました。
+
+`zod-to-json-schema` 3.25.2（ISC）は、2026年10月にbridgeサービスがツールの入力スキーマを変換するため直接依存に加えました。以前から`@modelcontextprotocol/sdk`の依存として同じ版を同梱しており、同梱対象の件数は変わりません。
 
 ## 依存やバイナリを同梱する場合
 

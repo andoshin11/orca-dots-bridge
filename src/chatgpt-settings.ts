@@ -2,7 +2,6 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { BridgeError } from "./errors.js";
 
 // Settings shown on the ChatGPT plugin page through OpenAI MCP Extensions
@@ -30,7 +29,7 @@ const properties = {
     type: "boolean",
     title: "通知を受け取る",
     description:
-      "オンにすると、dot に頼んだ Orca のペインのターン終了・入力待ちを通知します（通知用 Tunnel と、この Mac の通知サービスが必要です）。オフにすると購読をすべて止めます。",
+      "オンにすると、dot に頼んだ Orca のペインのターン終了・入力待ちを通知します（Orca で Agent Status Relay プラグインを有効にしておく必要があります）。オフにすると購読をすべて止めます。",
   },
 } as const;
 export type ChatgptSettings = { sendEnabled: boolean; notificationsEnabled: boolean };
@@ -120,55 +119,5 @@ export function fromSettingsPage(meta: Record<string, unknown> | undefined) {
     meta !== undefined &&
     typeof meta["openai/action_name"] === "string" &&
     !("openai/session" in meta)
-  );
-}
-
-export function registerChatgptSettings(server: McpServer, path = chatgptSettingsPath()) {
-  const structured = (value: Record<string, unknown>) => ({
-    content: [{ type: "text" as const, text: JSON.stringify(value) }],
-    structuredContent: value,
-  });
-  server.registerTool(
-    settingsTools.read,
-    {
-      title: "Orca Dots Bridge の設定を読む",
-      description: "Read this bridge's ChatGPT plugin settings. No Orca access.",
-      inputSchema: {},
-      outputSchema: {
-        schema: z.record(z.string(), z.unknown()),
-        values: z.record(z.string(), z.unknown()),
-        layout: z.array(z.record(z.string(), z.unknown())).optional(),
-      },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    async () => structured(settingsReadResult(await readSettings(path))),
-  );
-  server.registerTool(
-    settingsTools.update,
-    {
-      title: "Orca Dots Bridge の設定を変える",
-      description:
-        "Only for ChatGPT's plugin settings page, which sends changed values. Never call from chat. No Orca access.",
-      inputSchema: updateShape,
-      outputSchema: { values: z.record(z.string(), z.unknown()) },
-      annotations: {
-        readOnlyHint: false,
-        destructiveHint: false,
-        idempotentHint: true,
-        openWorldHint: false,
-      },
-    },
-    async ({ set }, extra) => {
-      // Anything that widens access can only be turned on from the settings page.
-      if (
-        (set.sendEnabled === true || set.notificationsEnabled === true) &&
-        !fromSettingsPage(extra._meta)
-      )
-        throw new BridgeError(
-          "settings_page_only",
-          "Turning this on is only accepted from this plugin's settings page in ChatGPT. Ask the user to turn it on there.",
-        );
-      return structured({ values: await updateSettings(path, set) });
-    },
   );
 }

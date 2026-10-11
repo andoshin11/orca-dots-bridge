@@ -28,7 +28,7 @@
       <h2>セットアップ</h2>
       <ol class="setup">
         <li>
-          <h3>状態確認用の Tunnel を作る（初回だけ）</h3>
+          <h3>Tunnel を作る（初回だけ）</h3>
           <p>
             Platform の Tunnels で <b>Create tunnel</b> を押し、Name と Description
             を入れて、ChatGPT workspaces で個人の workspace を選んで作成します。一覧のコピーボタンで
@@ -52,12 +52,13 @@
           </div>
           <div class="row">
             <button type="button" data-open="tunnels">Tunnels を開く</button>
-            <input id="statusTunnelId" placeholder="tunnel_..." spellcheck="false" />
+            <input id="tunnelId" placeholder="tunnel_..." spellcheck="false" />
           </div>
-          <details>
-            <summary>通知用の Tunnel も使う</summary>
-            <input id="notificationTunnelId" placeholder="tunnel_..." spellcheck="false" />
-          </details>
+          <p class="muted small">
+            以前に状態確認用と通知用の 2 つの Tunnel
+            を作っていた場合は、ここは空のままで構いません（状態確認用の Tunnel
+            をそのまま使います）。
+          </p>
         </li>
         <li>
           <h3>runtime キーを作る（初回と、期限が来る前）</h3>
@@ -100,13 +101,8 @@
             を入れる（版とハッシュを固定）</label
           >
           <label
-            ><input id="installAgent" type="checkbox" checked /> 状態確認用の Tunnel
-            をログイン時に自動起動する</label
-          >
-          <label
-            ><input id="installNotifications" type="checkbox" /> 通知サービスと通知用の Tunnel
-            を常駐させる（「通知用の Tunnel も使う」に ID が必要。通知を受け取るかは ChatGPT
-            のプラグイン設定で切り替えます）</label
+            ><input id="installAgent" type="checkbox" checked /> bridge サービスと Tunnel
+            をログイン時に自動起動する（以前の 2 つの Tunnel の構成からも、ここで移行します）</label
           >
           <div class="row">
             <button id="run" type="button" class="primary">セットアップを実行</button>
@@ -121,7 +117,13 @@
             を選び（一覧に出る名前を押すか ID を貼り付け）、認証を<b>認証なし</b>にします（Tunnel
             接続では runtime キーで守られるためです。サーバー URL
             で公開する構成では認証なしにしないでください）。確認のチェックを入れて「プラグインとして作成」を押してください。作成後の送信の許可などの設定は、このアプリではなく
-            ChatGPT のプラグイン管理画面で行います（「指示の送信を許可」は既定でオフです）。
+            ChatGPT
+            のプラグイン管理画面で行います（「指示の送信を許可」と「通知を受け取る」は既定でオフです）。
+          </p>
+          <p>
+            以前の 2 つの Tunnel
+            の構成から移った場合は、プラグインを作り直す必要はありません。状態確認用のプラグインの管理画面で<b>ツールを更新</b>を押し、通知用に作ったプラグインは削除してください（Platform
+            の通知用 Tunnel も削除できます）。そのあと dot に通知の購読をもう一度頼んでください。
           </p>
           <div class="shots">
             <figure>
@@ -144,6 +146,19 @@
             <button id="copyTunnel" type="button">ID をコピー</button>
             <button type="button" data-open="connectors">プラグイン画面を開く</button>
           </div>
+        </li>
+        <li>
+          <h3>通知を使う（任意）</h3>
+          <p>
+            エージェントのターン終了や入力待ちを dot に知らせるには、Orca に Agent Status Relay
+            プラグインを入れます。Orca の<b>設定 → プラグイン → ソースを管理</b>で Git
+            のソースとして <code>https://github.com/andoshin11/orca-plugins</code>（ref は
+            <code>main</code>）を追加し、一覧の
+            <b>Agent Status Relay</b>
+            をインストールして<b>プラグインを有効にする</b>を押します（権限は events:subscribe
+            です）。接続先の設定はセットアップが済ませています。最後に ChatGPT
+            のプラグイン管理画面で<b>通知を受け取る</b>をオンにし、dot に通知を頼んでください。
+          </p>
         </li>
       </ol>
     </section>
