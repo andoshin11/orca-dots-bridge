@@ -13,13 +13,18 @@ import {
 } from "./webhook.js";
 import { notificationTargetSchema, type NotificationTarget } from "./orca-contract.js";
 import { externalOrcaEventSchema } from "./orca-adapter.js";
-import { paneTargetSchema, type PaneTarget } from "./pane-contract.js";
+import {
+  isPaneEventName,
+  paneEventNames,
+  paneTargetSchema,
+  type PaneTarget,
+} from "./pane-contract.js";
 const engineTargetSchema = z.union([targetSchema, notificationTargetSchema, paneTargetSchema]);
 const engineEventNames = [
   ...eventNames,
   "orca.monitoring_interrupted",
   "orca.session_activity",
-  "orca.pane_activity",
+  ...paneEventNames,
 ] as const;
 export type EngineTarget = Target | NotificationTarget | PaneTarget;
 const finiteTime = z.number().int().nonnegative().max(8640000000000000);
@@ -68,7 +73,7 @@ const sessionActivitySchema = z
 const paneActivitySchema = z
   .object({
     eventId: bounded,
-    name: z.literal("orca.pane_activity"),
+    name: z.enum(paneEventNames),
     timestamp: z.string().datetime(),
     cursor: z.null(),
     data: z
@@ -89,6 +94,13 @@ const paneActivitySchema = z
       : e.data.kind === "monitoring_interrupted"
         ? e.data.reason !== undefined && e.data.outcome === undefined
         : e.data.outcome === undefined && e.data.reason === undefined,
+  )
+  // A single-kind event name never carries the other kind.
+  .refine(
+    (e) =>
+      e.name === "orca.pane_activity" ||
+      e.data.kind === "monitoring_interrupted" ||
+      e.name === `orca.pane_${e.data.kind}`,
   );
 const monitoredActivitySchema = z.union([sessionActivitySchema, paneActivitySchema]);
 const eventSchema = z.union([
@@ -135,10 +147,10 @@ const stateSchema = z
   })
   .strict();
 type State = z.infer<typeof stateSchema>;
-// The pane event name and the pane target shape only ever go together, so a
+// Pane event names and the pane target shape only ever go together, so a
 // pane-scoped subscription can never be created for a stricter target or the reverse.
 const paneNameMatchesTarget = (value: { name: string; arguments: unknown }) =>
-  (value.name === "orca.pane_activity") === paneTargetSchema.safeParse(value.arguments).success;
+  isPaneEventName(value.name) === paneTargetSchema.safeParse(value.arguments).success;
 export const subscribeSchema = z
   .object({
     name: z.enum(engineEventNames),

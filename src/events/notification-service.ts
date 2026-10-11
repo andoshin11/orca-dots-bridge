@@ -38,17 +38,41 @@ const shortTargetSchema = z
   })
   .strict();
 
-export const serviceCatalog = paneCatalog.map((event) => ({
-  ...event,
-  description: `${event.description} Pass the terminal handle and worktree ID that orca_status returned for the agent.`,
-  inputSchema: {
-    type: "object",
-    properties: {
-      terminalHandle: { type: "string", minLength: 1, maxLength: 4096 },
-      worktreeId: { type: "string", minLength: 1, maxLength: 4096 },
-    },
-    required: ["terminalHandle", "worktreeId"],
-    additionalProperties: false,
+const shortInputSchema = {
+  type: "object",
+  properties: {
+    terminalHandle: { type: "string", minLength: 1, maxLength: 4096 },
+    worktreeId: { type: "string", minLength: 1, maxLength: 4096 },
+  },
+  required: ["terminalHandle", "worktreeId"],
+  additionalProperties: false,
+};
+const paneEvent = paneCatalog[0]!;
+const howToSubscribe =
+  "Pass the terminal handle and worktree ID that orca_status returned for the agent. Pane-scoped: a new agent session in the same pane is not distinguished and missed events are not detected; report a received observation, never assert it as confirmed.";
+/**
+ * One event per kind, so the kind is in the event name: a subscriber that does not
+ * surface the payload still knows whether a turn ended or input is needed.
+ */
+export const serviceCatalog = [
+  {
+    name: "orca.pane_turn_finished",
+    description: `An Orca agent's turn ended in the subscribed pane (success unconfirmed), as reported by the orca-agent-status-relay plugin. A monitoring_interrupted payload means monitoring of the pane stopped instead. ${howToSubscribe}`,
+    kinds: ["turn_finished", "monitoring_interrupted"],
+  },
+  {
+    name: "orca.pane_input_required",
+    description: `An Orca agent in the subscribed pane is waiting for input or approval, as reported by the orca-agent-status-relay plugin. A monitoring_interrupted payload means monitoring of the pane stopped instead. ${howToSubscribe}`,
+    kinds: ["input_required", "monitoring_interrupted"],
+  },
+].map(({ name, description, kinds }) => ({
+  name,
+  description,
+  delivery: paneEvent.delivery,
+  inputSchema: shortInputSchema,
+  payloadSchema: {
+    ...paneEvent.payloadSchema,
+    properties: { ...paneEvent.payloadSchema.properties, kind: { enum: kinds } },
   },
 }));
 
