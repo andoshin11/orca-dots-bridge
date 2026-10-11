@@ -140,6 +140,8 @@ export const diagnosticStages = [
   "relay_test_received",
   "relay_status_received",
   "pane_status_queued",
+  "scope_status_queued",
+  "scope_status_unresolved",
   "notifications_disabled",
   "callback_host_rejected",
   "subscriptions_resumed",

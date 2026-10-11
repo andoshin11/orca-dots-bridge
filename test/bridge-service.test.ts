@@ -46,7 +46,15 @@ afterEach(async () => {
 });
 
 /** A stand-in Orca CLI: one writable agent terminal, and receipts for sends. */
-function fakeOrca(options: { agents?: object[]; psFails?: boolean } = {}) {
+function fakeOrca(
+  options: {
+    agents?: object[];
+    psFails?: boolean;
+    /** Extra worktrees and terminals (mutable: tests add workspaces later). */
+    worktrees?: object[];
+    terminals?: object[];
+  } = {},
+) {
   const calls: string[][] = [];
   const terminal = {
     handle: "term_1",
@@ -61,23 +69,27 @@ function fakeOrca(options: { agents?: object[]; psFails?: boolean } = {}) {
     new OrcaAdapter(async (args) => {
       calls.push(args);
       if (args[0] === "worktree" && options.psFails) throw new Error("synthetic ps failure");
-      const worktrees = options.agents
-        ? [
-            {
-              worktreeId: "wt_1",
-              repo: "repo",
-              branch: "main",
-              displayName: "ws",
-              status: "active",
-              agents: options.agents,
-            },
-          ]
-        : [];
+      const worktrees = [
+        ...(options.agents
+          ? [
+              {
+                worktreeId: "wt_1",
+                repo: "repo",
+                branch: "main",
+                displayName: "ws",
+                status: "active",
+                agents: options.agents,
+              },
+            ]
+          : []),
+        ...(options.worktrees ?? []),
+      ];
+      const terminals = options.terminals ?? [];
       const result =
         args[0] === "worktree"
           ? { worktrees, totalCount: worktrees.length, truncated: false }
           : args[1] === "list"
-            ? { terminals: [], totalCount: 0, truncated: false }
+            ? { terminals, totalCount: terminals.length, truncated: false }
             : args[1] === "show"
               ? { terminal }
               : {
@@ -172,18 +184,23 @@ async function fixture(options: {
     });
     return (await response.json()) as any;
   };
-  const relay = async (kind: string) => {
+  const relay = async (
+    kind: string,
+    pane: { worktreeId: string | null; paneKey: string } = target,
+    startedAt = Date.now() - 10,
+  ) => {
     const id = `msg_${randomUUID()}`;
     const seconds = String(Math.floor(Date.now() / 1000));
+    const [tabId, leafId] = pane.paneKey.split(":");
     const body = JSON.stringify({
       type: "agent.status.changed",
       kind,
-      worktreeId: target.worktreeId,
-      paneKey: target.paneKey,
-      tabId: "tab_1",
-      leafId: "leaf_1",
+      worktreeId: pane.worktreeId,
+      paneKey: pane.paneKey,
+      tabId,
+      leafId,
       state: kind,
-      mainAgent: { state: kind, stateStartedAt: Date.now() - 10 },
+      mainAgent: { state: kind, stateStartedAt: startedAt },
       receivedAt: Date.now(),
     });
     const signature = createHmac("sha256", relayKey)
@@ -226,8 +243,17 @@ it("lists one event per kind with the handle + worktree ID arguments dot can sup
     "orca.pane_turn_finished",
     "orca.pane_input_required",
   ]);
-  for (const e of listed.result.events)
-    expect(e.inputSchema.required).toEqual(["terminalHandle", "worktreeId"]);
+  for (const e of listed.result.events) {
+    // One pane (handle + worktree ID), or one scope of many panes.
+    expect(e.inputSchema.oneOf.map((o: any) => o.required)).toEqual([
+      ["terminalHandle", "worktreeId"],
+      ["scope"],
+      ["scope", "repo"],
+      ["scope", "worktreeId"],
+    ]);
+    for (const o of e.inputSchema.oneOf) expect(o.additionalProperties).toBe(false);
+    expect(e.description).toContain("scope");
+  }
 });
 
 it("names each delivery after its kind and sends a subscription only its own kind", async () => {
@@ -501,12 +527,15 @@ it("serves every tool of the one plugin and advertises the ChatGPT settings", as
   expect(Object.keys(tools)).toEqual([
     "orca_status",
     "orca_find",
+    "orca_brief",
     "orca_pending_input",
     "orca_send_instruction",
     "orca_answer",
     "orca_create_workspace",
     "orca_close_agent",
     "orca_remove_workspace",
+    "orca_set_alias",
+    "orca_remove_alias",
     "orca_settings_read",
     "orca_settings_update",
     "orca_recent_notifications",
@@ -695,4 +724,177 @@ it("turns settings on only from the ChatGPT settings page", async () => {
   // Turning something off is accepted from anywhere.
   const off = await update({ notificationsEnabled: false });
   expect(off.result.structuredContent.values.notificationsEnabled).toBe(false);
+});
+
+// ---- scope subscriptions ----
+
+/** Three panes in two repos; a pane's terminal is named after it. */
+function scopeOrca() {
+  const worktree = (worktreeId: string, repo: string, displayName: string) => ({
+    worktreeId,
+    repo,
+    branch: displayName,
+    displayName,
+    status: "active",
+    agents: [] as object[],
+  });
+  const term = (handle: string, worktreeId: string, tabId: string) => ({
+    handle,
+    worktreeId,
+    tabId,
+    leafId: "leaf",
+    connected: true,
+  });
+  const worktrees = [
+    worktree("wt_1", "repo", "ws"),
+    worktree("wt_2", "repo", "ws2"),
+    worktree("wt_3", "other", "elsewhere"),
+  ];
+  worktrees[1]!.agents.push({
+    paneKey: "tab_2:leaf",
+    state: "waiting",
+    toolName: "Bash",
+    toolInput: "npm publish",
+    lastAssistantMessage: "Ready to publish.",
+  });
+  const terminals = [
+    term("term_1", "wt_1", "tab_1"),
+    term("term_2", "wt_2", "tab_2"),
+    term("term_3", "wt_3", "tab_3"),
+  ];
+  return { ...fakeOrca({ worktrees, terminals }), worktrees, terminals, worktree, term };
+}
+const pane = (worktreeId: string | null, tab: string) => ({ worktreeId, paneKey: `${tab}:leaf` });
+const events = (posts: { body: any }[]) => posts.filter((p) => p.body.type !== "verification");
+
+it("delivers every pane's events to one scope subscription and says which pane", async () => {
+  const orca = scopeOrca();
+  const f = await fixture({ enabled: true, bridge: orca.bridge });
+  await f.start();
+  const reply = await f.subscribe({ scope: "all" }, "orca.pane_input_required");
+  expect(reply.result.id).toMatch(/^sub_/);
+  await f.relay("waiting", pane("wt_2", "tab_2"));
+  // The relay may omit the worktree: the pane key finds it.
+  await f.relay("blocked", pane(null, "tab_3"));
+  // Turn ends are another event name.
+  await f.relay("done", pane("wt_2", "tab_2"));
+  await f.until(() => events(f.posts).length === 2);
+  await new Promise((r) => setTimeout(r, 100));
+  expect(events(f.posts).map((p) => [p.body.name, p.body.data.kind, p.body.data.pane])).toEqual([
+    [
+      "orca.pane_input_required",
+      "input_required",
+      { worktreeId: "wt_2", terminalHandle: "term_2", repo: "repo", workspace: "ws2" },
+    ],
+    [
+      "orca.pane_input_required",
+      "input_required",
+      { worktreeId: "wt_3", terminalHandle: "term_3", repo: "other", workspace: "elsewhere" },
+    ],
+  ]);
+  // The recent memory knows the pane and reads the summary for it.
+  let notifications: any[] = [];
+  for (let i = 0; i < 100; i++) {
+    const r = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
+    notifications = r.result.structuredContent.notifications;
+    if (notifications.some((n) => n.summary)) break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  expect(notifications).toEqual([
+    {
+      event: "orca.pane_input_required",
+      kind: "input_required",
+      at: expect.any(String),
+      worktreeId: "wt_3",
+      terminalHandle: "term_3",
+      repo: "other",
+      workspace: "elsewhere",
+    },
+    {
+      event: "orca.pane_input_required",
+      kind: "input_required",
+      at: expect.any(String),
+      worktreeId: "wt_2",
+      terminalHandle: "term_2",
+      repo: "repo",
+      workspace: "ws2",
+      summary: "Ready to publish.",
+      pending: { kind: "permission", toolName: "Bash", toolInput: "npm publish" },
+    },
+  ]);
+});
+
+it("a repo scope covers workspaces created later and only that repo", async () => {
+  const orca = scopeOrca();
+  const f = await fixture({ enabled: true, bridge: orca.bridge });
+  await f.start();
+  // A misheard repo name is refused rather than becoming a silent subscription.
+  expect((await f.subscribe({ scope: "repo", repo: "rpo" })).error).toBeDefined();
+  expect((await f.subscribe({ scope: "repo", repo: "repo", extra: 1 })).error).toBeDefined();
+  expect((await f.subscribe({ scope: "worktree", worktreeId: "wt_nope" })).error).toBeDefined();
+  // Scope subscriptions exist for the single-kind events only.
+  expect((await f.subscribe({ scope: "all" }, "orca.pane_activity")).error).toBeDefined();
+  expect((await f.subscribe({ scope: "repo", repo: "repo" })).result.id).toMatch(/^sub_/);
+  await f.relay("done", pane("wt_3", "tab_3"));
+  await f.relay("done", pane("wt_1", "tab_1"));
+  await f.until(() => events(f.posts).length === 1);
+  expect(events(f.posts)[0]!.body.data.pane.worktreeId).toBe("wt_1");
+  // A workspace created after subscribing, past the short cache.
+  orca.worktrees.push(orca.worktree("wt_new", "repo", "fresh"));
+  orca.terminals.push(orca.term("term_new", "wt_new", "tab_new"));
+  await new Promise((r) => setTimeout(r, 600));
+  await f.relay("done", pane("wt_new", "tab_new"));
+  await f.until(() => events(f.posts).length === 2);
+  expect(events(f.posts)[1]!.body.data.pane).toEqual({
+    worktreeId: "wt_new",
+    terminalHandle: "term_new",
+    repo: "repo",
+    workspace: "fresh",
+  });
+});
+
+it("delivers a pane's event once when a pane and scope subscriptions overlap", async () => {
+  const orca = scopeOrca();
+  const f = await fixture({ enabled: true, bridge: orca.bridge });
+  await f.start();
+  await f.subscribe(); // pane term_1 (wt_1, tab_1:leaf_1 via describe)
+  await f.subscribe({ scope: "all" });
+  await f.subscribe({ scope: "repo", repo: "repo" });
+  await f.subscribe({ scope: "worktree", worktreeId: "wt_2" });
+  await f.relay("done", target); // the pane subscription's pane
+  await f.relay("done", pane("wt_2", "tab_2")); // worktree scope is the narrowest
+  await f.relay("done", pane("wt_3", "tab_3")); // only "all" covers it
+  await f.until(() => events(f.posts).length >= 3);
+  await new Promise((r) => setTimeout(r, 200));
+  const delivered = events(f.posts).map((p) => String(p.body.data.pane?.worktreeId ?? "pane"));
+  expect(delivered.sort((a, b) => a.localeCompare(b))).toEqual(["pane", "wt_2", "wt_3"]);
+});
+
+it("keeps scope subscriptions across a restart, unsubscribes them and drops them when off", async () => {
+  const orca = scopeOrca();
+  const f = await fixture({ enabled: true, bridge: orca.bridge });
+  const first = await f.start();
+  await f.subscribe({ scope: "worktree", worktreeId: "wt_2" });
+  await first.close();
+  running.splice(running.indexOf(first), 1);
+  await f.start();
+  await f.relay("done", pane("wt_2", "tab_2"));
+  await f.until(() => events(f.posts).length === 1);
+
+  const unsubscribed = await f.mcp("events/unsubscribe", {
+    name: "orca.pane_turn_finished",
+    arguments: { scope: "worktree", worktreeId: "wt_2" },
+    delivery: { mode: "webhook", url: callback },
+  });
+  expect(unsubscribed.error).toBeUndefined();
+  await f.relay("done", pane("wt_2", "tab_2"), Date.now() - 5);
+  await new Promise((r) => setTimeout(r, 200));
+  expect(events(f.posts)).toHaveLength(1);
+
+  await f.subscribe({ scope: "all" });
+  await writeFile(f.settingsPath, JSON.stringify({ notificationsEnabled: false }));
+  await new Promise((r) => setTimeout(r, 200));
+  await f.relay("done", pane("wt_3", "tab_3"));
+  await new Promise((r) => setTimeout(r, 200));
+  expect(events(f.posts)).toHaveLength(1);
 });

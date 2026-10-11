@@ -15,18 +15,26 @@ import { notificationTargetSchema, type NotificationTarget } from "./orca-contra
 import { externalOrcaEventSchema } from "./orca-adapter.js";
 import {
   isPaneEventName,
+  isScopeEventName,
   paneEventNames,
   paneTargetSchema,
+  scopeTargetSchema,
   type PaneTarget,
+  type ScopeTarget,
 } from "./pane-contract.js";
-const engineTargetSchema = z.union([targetSchema, notificationTargetSchema, paneTargetSchema]);
+const engineTargetSchema = z.union([
+  targetSchema,
+  notificationTargetSchema,
+  paneTargetSchema,
+  scopeTargetSchema,
+]);
 const engineEventNames = [
   ...eventNames,
   "orca.monitoring_interrupted",
   "orca.session_activity",
   ...paneEventNames,
 ] as const;
-export type EngineTarget = Target | NotificationTarget | PaneTarget;
+export type EngineTarget = Target | NotificationTarget | PaneTarget | ScopeTarget;
 const finiteTime = z.number().int().nonnegative().max(8640000000000000);
 const bounded = z.string().min(1).max(512);
 const legacyEventSchema = z
@@ -84,6 +92,16 @@ const paneActivitySchema = z
         kind: z.enum(["turn_finished", "input_required", "monitoring_interrupted"]),
         outcome: z.literal("unconfirmed").optional(),
         reason: z.string().max(64).optional(),
+        // Which pane a scope subscription's event came from.
+        pane: z
+          .object({
+            worktreeId: z.string().min(1).max(4096),
+            terminalHandle: z.string().min(1).max(4096).optional(),
+            repo: z.string().min(1).max(200).optional(),
+            workspace: z.string().min(1).max(200).optional(),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
   })
@@ -92,7 +110,7 @@ const paneActivitySchema = z
     e.data.kind === "turn_finished"
       ? e.data.outcome === "unconfirmed" && e.data.reason === undefined
       : e.data.kind === "monitoring_interrupted"
-        ? e.data.reason !== undefined && e.data.outcome === undefined
+        ? e.data.reason !== undefined && e.data.outcome === undefined && e.data.pane === undefined
         : e.data.outcome === undefined && e.data.reason === undefined,
   )
   // A single-kind event name never carries the other kind.
@@ -147,10 +165,13 @@ const stateSchema = z
   })
   .strict();
 type State = z.infer<typeof stateSchema>;
-// Pane event names and the pane target shape only ever go together, so a
+// Pane event names and the pane (or scope) target shapes only ever go together, so a
 // pane-scoped subscription can never be created for a stricter target or the reverse.
+// Scope targets exist for the single-kind pane events only.
 const paneNameMatchesTarget = (value: { name: string; arguments: unknown }) =>
-  isPaneEventName(value.name) === paneTargetSchema.safeParse(value.arguments).success;
+  scopeTargetSchema.safeParse(value.arguments).success
+    ? isScopeEventName(value.name)
+    : isPaneEventName(value.name) === paneTargetSchema.safeParse(value.arguments).success;
 export const subscribeSchema = z
   .object({
     name: z.enum(engineEventNames),
@@ -253,6 +274,25 @@ export class EventEngine {
     } catch {
       throw new EventError("state_unavailable");
     }
+  }
+  /**
+   * Remembers a queued event for duplicate suppression. The memory is bounded by
+   * forgetting the oldest entries that are no longer waiting for delivery, so a
+   * long-lived subscription never runs into the limit.
+   */
+  private rememberSeen(subId: string, eventId: string) {
+    this.state.seen.push({ subId, eventId });
+    const overflow = this.state.seen.length - 2048;
+    if (overflow <= 0) return;
+    const pending = new Set(this.state.pending.map((p) => `${p.subId}\n${p.event.eventId}`));
+    let drop = overflow;
+    this.state.seen = this.state.seen.filter((s) => {
+      if (drop > 0 && !pending.has(`${s.subId}\n${s.eventId}`)) {
+        drop--;
+        return false;
+      }
+      return true;
+    });
   }
   private remove(id: string) {
     this.state.subscriptions = this.state.subscriptions.filter((s) => s.id !== id);
@@ -424,15 +464,14 @@ export class EventEngine {
         }
         if (
           this.state.pending.length >= 128 ||
-          this.state.pending.filter((p) => p.subId === s.id).length >= 16 ||
-          this.state.seen.length >= 2048
+          this.state.pending.filter((p) => p.subId === s.id).length >= 16
         ) {
           result.rejected++;
           continue;
         }
         const body = JSON.stringify(event);
         this.state.pending.push({ subId: s.id, event, body, attempts: 0, nextAt: this.now() });
-        this.state.seen.push({ subId: s.id, eventId: event.eventId });
+        this.rememberSeen(s.id, event.eventId);
         result.queued++;
       }
       await this.persist();
@@ -443,7 +482,7 @@ export class EventEngine {
   async ingestSession(
     owner: string,
     id: string,
-    target: NotificationTarget | PaneTarget,
+    target: NotificationTarget | PaneTarget | ScopeTarget,
     input: unknown,
   ) {
     return this.serial(async () => {
@@ -465,8 +504,7 @@ export class EventEngine {
         return false;
       if (
         this.state.pending.length >= 128 ||
-        this.state.pending.filter((p) => p.subId === id).length >= 16 ||
-        this.state.seen.length >= 2048
+        this.state.pending.filter((p) => p.subId === id).length >= 16
       )
         throw new EventError("queue_limit");
       this.state.pending.push({
@@ -476,7 +514,7 @@ export class EventEngine {
         attempts: 0,
         nextAt: this.now(),
       });
-      this.state.seen.push({ subId: id, eventId: event.eventId });
+      this.rememberSeen(id, event.eventId);
       await this.persist();
       return true;
     });
