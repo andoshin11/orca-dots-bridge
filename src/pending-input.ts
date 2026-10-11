@@ -15,6 +15,8 @@ export type Menu = {
   multiSelect: boolean;
   /** The few lines just above the menu (e.g. "Do you want to proceed?"). */
   prompt: string | null;
+  /** Up to 6 non-empty lines above the first option, for telling menu kinds apart. */
+  context: string[];
 };
 
 // `❯ 1. Yes` (Claude Code), `› 1. Yes, proceed (y)` (Codex), `  2. No`.
@@ -67,14 +69,19 @@ export function parseMenu(lines: readonly string[]): Menu | null {
     label: clip(o.label.replace(checkbox, "").trim(), 200)!,
     selected: o.selected,
   }));
-  const above = rows
-    .slice(Math.max(0, first.index - 6), first.index)
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0 && !/^[─━═—-]+$/u.test(line));
+  const nonEmpty = (from: number) =>
+    rows
+      .slice(Math.max(0, from), first.index)
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0 && !/^[─━═—-]+$/u.test(line));
+  const above = nonEmpty(first.index - 6);
   return {
     options,
     multiSelect: found.some((o) => checkbox.test(o.label)),
     prompt: above.length ? clip(above.slice(-3).join("\n"), 300) : null,
+    context: nonEmpty(first.index - 10)
+      .slice(-6)
+      .map((line) => line.slice(0, 300)),
   };
 }
 
@@ -144,16 +151,70 @@ export function toolInputSummary(agent: Pick<Agent, "toolName" | "toolInput">) {
   return clip(input, 300);
 }
 
-export type PendingKind = "permission" | "question" | "free_input" | "unknown";
+export type PendingKind = "permission" | "question" | "selection" | "free_input" | "unknown";
 
-/** The kind of input an agent waits for, from Orca's status and (when read) the screen. */
+// Approval headers right above the options: Claude Code ("Do you want to proceed?",
+// "Do you want to make this edit to x?", "Do you want to create x?"), Codex ("Would you
+// like to run the following command?", "Would you like to make the following edits?",
+// "Allow command?") and similar. A question mark is required, so a settings menu titled
+// "Update Model Permissions" never counts.
+const approvalHeader =
+  /\b(?:do you want to|would you like to|allow|approve|permit)\b[^?？]*[?？]/iu;
+const approvalYes = /^(?:yes|allow|approve|proceed|run|accept)\b/iu;
+const approvalNo = /^(?:no|deny|reject|decline|cancel|don['’]t)\b|\(esc\)$/iu;
+/** Options shaped like an approval: the first says yes/allow, another says no/deny. */
+function approvalOptions(menu: Menu) {
+  return (
+    approvalYes.test(menu.options[0]?.label ?? "") &&
+    menu.options.slice(1).some((o) => approvalNo.test(o.label))
+  );
+}
+// Claude Code's AskUserQuestion screen: a tab row ("☐ Database  ✔ Submit") and its
+// fixed "Type something." / "Chat about this" options.
+const questionContext = /[☐☑✔✓]\s*Submit\b/u;
+const questionOption = /^(?:type something\.?|chat about this)$/iu;
+function questionLike(menu: Menu) {
+  return (
+    menu.context.some((line) => questionContext.test(line)) ||
+    menu.options.some((o) => questionOption.test(o.label))
+  );
+}
+
+/** Orca's states for an agent that is waiting on the user. */
+const waitingStates = new Set(["waiting", "blocked"]);
+/** States in which toolName only names the last tool the agent ran. */
+const finishedStates = new Set(["done", "idle"]);
+/** Whether the agent's toolName is only left over from its last turn. */
+export const staleTool = (agent: { state?: string | null } | undefined) =>
+  agent?.state != null && finishedStates.has(agent.state);
+
+/**
+ * The kind of input an agent waits for, from Orca's status and (when read) the visible
+ * screen. A finished (done or idle) agent's toolName is stale: it names the last tool
+ * the agent ran, so it is ignored.
+ *
+ * - permission: an approval prompt is visible (an approval header right above the
+ *   options), or a waiting agent with a pending tool shows approval-shaped options.
+ * - question: a question tool is pending, or the menu looks like AskUserQuestion.
+ * - selection: any other visible numbered menu (e.g. Codex's /permissions or /model).
+ * - free_input: no menu, the composer is open.
+ */
 export function pendingKind(
-  agent: Pick<Agent, "toolName"> | undefined,
+  agent: (Pick<Agent, "toolName"> & { state?: string | null }) | undefined,
   screen?: { menu: Menu | null; promptOpen: boolean },
 ): PendingKind {
-  const question = isQuestionTool(agent?.toolName);
-  if (!screen) return question ? "question" : agent?.toolName ? "permission" : "unknown";
-  if (screen.menu) return question ? "question" : agent?.toolName ? "permission" : "unknown";
+  const state = agent?.state ?? null;
+  const toolName = staleTool(agent) ? null : (agent?.toolName ?? null);
+  const question = isQuestionTool(toolName);
+  if (!screen) return question ? "question" : toolName ? "permission" : "unknown";
+  const menu = screen.menu;
+  if (menu) {
+    if (question || questionLike(menu)) return "question";
+    if (menu.context.some((line) => approvalHeader.test(line))) return "permission";
+    if (toolName && state !== null && waitingStates.has(state) && approvalOptions(menu))
+      return "permission";
+    return "selection";
+  }
   if (question) return "question";
   if (screen.promptOpen) return "free_input";
   return "unknown";

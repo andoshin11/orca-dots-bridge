@@ -1,5 +1,5 @@
 import { createHmac, randomUUID } from "node:crypto";
-import { mkdtemp, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { createServer, type AddressInfo } from "node:net";
 import { join } from "node:path";
@@ -534,6 +534,8 @@ it("serves every tool of the one plugin and advertises the ChatGPT settings", as
     "orca_create_workspace",
     "orca_close_agent",
     "orca_remove_workspace",
+    "orca_start_task",
+    "orca_audit_log",
     "orca_set_alias",
     "orca_remove_alias",
     "orca_settings_read",
@@ -659,6 +661,7 @@ it("refuses the workspace tools until each one's own setting is on", async () =>
     ["orca_create_workspace", { repo: "sample-repo", name: "task" }, "create_disabled"],
     ["orca_close_agent", { handle: "term_1", expectedWorktreeId: "wt_1" }, "close_disabled"],
     ["orca_remove_workspace", { worktreeId: "wt_1" }, "remove_disabled"],
+    ["orca_start_task", { repo: "sample-repo", template: "issue", issue: 12 }, "create_disabled"],
   ] as const;
   for (const [name, args, code] of calls) {
     const refused = await f.mcp("tools/call", { name, arguments: args });
@@ -671,6 +674,64 @@ it("refuses the workspace tools until each one's own setting is on", async () =>
   const closed = await f.mcp("tools/call", { name: calls[1][0], arguments: calls[1][1] });
   expect(orca.calls.map((c) => c.slice(0, 2).join(" "))).toContain("terminal show");
   expect(JSON.parse(closed.result.content[0].text).error?.code).not.toBe("close_disabled");
+});
+
+it("records every write call, refused or not, and lets dot read the record back", async () => {
+  const orca = fakeOrca();
+  const f = await fixture({ enabled: false, bridge: orca.bridge });
+  await f.start();
+  const call = (name: string, args: unknown, meta?: Record<string, unknown>) =>
+    f.mcp("tools/call", { name, arguments: args }, meta);
+  await call("orca_send_instruction", {
+    handle: "term_1",
+    expectedWorktreeId: "wt_1",
+    text: "secret-free instruction ".repeat(20),
+  });
+  await call("orca_start_task", { repo: "sample-repo", template: "pr_review", pr: 45 });
+  await call(
+    "orca_settings_update",
+    { set: { notificationsEnabled: true } },
+    {
+      "openai/action_name": "x",
+    },
+  );
+  // Read-only tools are never recorded.
+  await call("orca_find", {});
+  const read = await call("orca_audit_log", { limit: 10 });
+  const { entries } = JSON.parse(read.result.content[0].text);
+  expect(entries).toEqual([
+    {
+      time: expect.any(String),
+      source: "chatgpt",
+      tool: "orca_settings_update",
+      outcome: "ok",
+      target: { notificationsEnabled: true },
+      summary: "notificationsEnabled=true",
+    },
+    {
+      time: expect.any(String),
+      source: "chatgpt",
+      tool: "orca_start_task",
+      outcome: "refused",
+      errorCode: "create_disabled",
+      target: { repo: "sample-repo", template: "pr_review", pr: 45 },
+    },
+    {
+      time: expect.any(String),
+      source: "chatgpt",
+      tool: "orca_send_instruction",
+      outcome: "refused",
+      errorCode: "send_disabled",
+      target: { handle: "term_1", worktreeId: "wt_1" },
+      summary: expect.stringMatching(/^secret-free instruction .{150,}…$/),
+    },
+  ]);
+  expect(Array.from(entries[2].summary as string)).toHaveLength(200);
+  const only = await call("orca_audit_log", { tool: "orca_start_task" });
+  expect(JSON.parse(only.result.content[0].text).entries).toHaveLength(1);
+  const path = join(f.dir, "audit.log");
+  expect((await stat(path)).mode & 0o777).toBe(0o600);
+  expect((await readFile(path, "utf8")).trim().split("\n")).toHaveLength(3);
 });
 
 it("turns settings on only from the ChatGPT settings page", async () => {

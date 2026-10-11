@@ -16,6 +16,31 @@ export function nodeCandidates(home: string): string[];
 export function runtimeKeyFromClipboard(text: string | undefined): string | undefined;
 export function parseSetupRequest(input: unknown): SetupRequest;
 export const externalPages: string[];
+export type AuditEntry = {
+  time: string;
+  source: "chatgpt" | "stdio";
+  tool: string;
+  outcome: "ok" | "refused" | "error";
+  errorCode: string | undefined;
+  target: Record<string, string | number | boolean>;
+  summary: string | undefined;
+};
+export const auditViewLimit: number;
+export const auditToolLabels: Record<string, string>;
+export const auditOutcomeLabels: Record<string, string>;
+export function parseAuditLog(texts: Array<string | undefined>, limit?: number): AuditEntry[];
+export function formatAuditEntry(
+  entry: AuditEntry,
+  locale?: string,
+): {
+  time: string;
+  tool: string;
+  source: string;
+  target: string;
+  outcome: string;
+  outcomeClass: string;
+  summary: string;
+};
 export type ReleaseAsset = { name: string; url: string; size: number | undefined };
 export type Release = {
   version: string;

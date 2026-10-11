@@ -230,7 +230,12 @@ describe("ChatGPT plugin settings", () => {
       (await rpc({ HOME: home, ...env }, [initialize, initialized, list]))
         .get(2)
         .result.tools.map((t: { name: string }) => t.name);
-    const workspaceTools = ["orca_create_workspace", "orca_close_agent", "orca_remove_workspace"];
+    const workspaceTools = [
+      "orca_create_workspace",
+      "orca_close_agent",
+      "orca_remove_workspace",
+      "orca_start_task",
+    ];
     for (const env of <Record<string, string>[]>[
       {},
       { ORCA_BRIDGE_ENABLE_SEND: "1" },

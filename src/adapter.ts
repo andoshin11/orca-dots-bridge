@@ -167,8 +167,8 @@ export class OrcaAdapter {
     ).then((r) => r.send);
   }
   /**
-   * A new independent worktree in an exact repo. Never activates the app, forces setup
-   * hooks or links issues/PRs. `--json` is appended by the runner.
+   * A new independent worktree in an exact repo, optionally linked to one GitHub issue or
+   * PR. Never activates the app or forces setup hooks. `--json` is appended by the runner.
    */
   createWorktree(input: {
     repo: string;
@@ -176,6 +176,8 @@ export class OrcaAdapter {
     baseBranch?: string;
     agent?: string;
     prompt?: string;
+    issue?: number;
+    pr?: number;
   }) {
     return this.read(
       [
@@ -191,6 +193,8 @@ export class OrcaAdapter {
         ...(input.baseBranch === undefined ? [] : ["--base-branch", value(input.baseBranch)]),
         ...(input.agent === undefined ? [] : ["--agent", value(input.agent)]),
         ...(input.prompt === undefined ? [] : ["--prompt", value(input.prompt)]),
+        ...(input.issue === undefined ? [] : ["--issue", linkNumber(input.issue)]),
+        ...(input.pr === undefined ? [] : ["--pr", linkNumber(input.pr)]),
       ],
       createResultSchema,
       60000,
@@ -230,4 +234,11 @@ function value(text: string) {
   )
     throw new BridgeError("invalid_input", "Invalid arguments or out-of-range limit/cursor.");
   return text;
+}
+
+/** A GitHub issue or PR number as a plain positive decimal. */
+function linkNumber(n: number) {
+  if (!Number.isSafeInteger(n) || n < 1)
+    throw new BridgeError("invalid_input", "Invalid arguments or out-of-range limit/cursor.");
+  return String(n);
 }

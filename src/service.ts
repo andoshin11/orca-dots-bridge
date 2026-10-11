@@ -13,9 +13,16 @@ import {
   pendingKind,
   promptOpen,
   screenRows,
+  staleTool,
   structuredQuestions,
   toolInputSummary,
 } from "./pending-input.js";
+import {
+  defaultWorkspaceName,
+  renderPrompt,
+  taskTemplates,
+  type TemplateConfig,
+} from "./templates.js";
 const identifier = z
   .string()
   .min(1)
@@ -122,6 +129,28 @@ export const createWorkspaceSchema = z
     prompt: instructionText.refine((value) => !value.trimStart().startsWith("-")).optional(),
   })
   .strict();
+const linkNumber = z.number().int().min(1).max(1_000_000_000);
+export const startTaskSchema = z
+  .object({
+    repo: createWorkspaceSchema.shape.repo,
+    template: z.enum(taskTemplates),
+    issue: linkNumber.optional(),
+    pr: linkNumber.optional(),
+    prompt: createWorkspaceSchema.shape.prompt,
+    agent: createWorkspaceSchema.shape.agent,
+    name: workspaceName.optional(),
+    note: instructionText
+      .refine((value) => value.length <= 2000 && !value.trimStart().startsWith("-"))
+      .optional(),
+  })
+  .strict();
+/** Exactly the fields its template needs: issue, pr or prompt. */
+const startTaskInput = startTaskSchema.refine(
+  (o) =>
+    (o.template === "issue") === (o.issue !== undefined) &&
+    (o.template === "pr_review") === (o.pr !== undefined) &&
+    (o.template === "custom") === (o.prompt !== undefined),
+);
 export const closeAgentSchema = z
   .object({
     handle: terminalHandle.optional(),
@@ -854,6 +883,46 @@ export class Bridge {
     const o = parse(createWorkspaceSchema, input);
     if (o.prompt !== undefined && o.agent === undefined)
       throw new BridgeError("invalid_input", "A prompt needs an agent to start.");
+    return this.create(o);
+  }
+  /**
+   * A common task in one call: a new workspace whose agent starts with a built-in (or
+   * templates.json) prompt for one GitHub issue, one PR review, or the user's own prompt,
+   * linked to that issue or PR in Orca.
+   */
+  async startTask(input: unknown, config: TemplateConfig) {
+    const o = parse(startTaskInput, input);
+    const number = o.issue ?? o.pr;
+    const prompt = renderPrompt(config, {
+      template: o.template,
+      ...(number !== undefined ? { number } : {}),
+      ...(o.prompt !== undefined ? { prompt: o.prompt } : {}),
+      ...(o.note !== undefined ? { note: o.note } : {}),
+    });
+    const request = parse(createWorkspaceSchema, {
+      repo: o.repo,
+      name: o.name ?? defaultWorkspaceName({ template: o.template, number }, this.now()),
+      agent: o.agent ?? config.defaultAgent,
+      prompt,
+    });
+    const created = await this.create({
+      ...request,
+      ...(o.issue !== undefined ? { issue: o.issue } : {}),
+      ...(o.pr !== undefined ? { pr: o.pr } : {}),
+    });
+    return {
+      ...created,
+      template: o.template,
+      ...(o.issue !== undefined ? { issue: o.issue } : {}),
+      ...(o.pr !== undefined ? { pr: o.pr } : {}),
+      promptSource: config.overridden.includes(o.template) ? "templates.json" : "builtin",
+      ...(config.problem ? { templatesFile: config.problem } : {}),
+      prompt: clip(prompt, 600),
+    };
+  }
+  private async create(
+    o: z.output<typeof createWorkspaceSchema> & { issue?: number; pr?: number },
+  ) {
     let result;
     try {
       result = await this.adapter.createWorktree(o);
@@ -1020,7 +1089,9 @@ export class Bridge {
       agent,
       read ? { menu, promptOpen: promptOpen(read.lines) } : undefined,
     );
-    const questions = agent ? structuredQuestions(agent.toolName, agent.toolInput) : null;
+    // A finished agent's tool fields describe its last turn, not what is on screen now.
+    const tool = agent && !staleTool(agent) ? agent : undefined;
+    const questions = tool ? structuredQuestions(tool.toolName, tool.toolInput) : null;
     const since = agent?.stateStartedAt ?? agent?.updatedAt ?? null;
     return {
       worktreeId,
@@ -1029,8 +1100,8 @@ export class Bridge {
       state: agent ? normalizeAgent(agent, now).state : "unknown",
       waitingSec: since === null ? null : Math.max(0, Math.round((now - since) / 1000)),
       kind,
-      toolName: clip(agent?.toolName, 100),
-      toolInput: agent ? toolInputSummary(agent) : null,
+      toolName: clip(tool?.toolName, 100),
+      toolInput: tool ? toolInputSummary(tool) : null,
       questions,
       lastAssistantMessage: clip(agent?.lastAssistantMessage?.trim() || null, 400),
       menuVisible: menu !== null,

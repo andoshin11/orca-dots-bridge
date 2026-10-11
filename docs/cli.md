@@ -111,7 +111,7 @@ command -v orca
 }
 ```
 
-クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り9ツール（`orca_brief`・`orca_pending_input`を含む）が表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`と`orca_answer`（入力待ちのエージェントの質問に答える）は変更操作です。あわせて、ワークスペースの呼び名を保存する`orca_set_alias`・`orca_remove_alias`も追加されます（手元の`aliases.json`に書くだけで、Orcaは変更しません）。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
+クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り10ツール（`orca_brief`・`orca_pending_input`・`orca_audit_log`を含む）が表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`と`orca_answer`（入力待ちのエージェントの質問に答える）は変更操作です。あわせて、ワークスペースの呼び名を保存する`orca_set_alias`・`orca_remove_alias`も追加されます（手元の`aliases.json`に書くだけで、Orcaは変更しません）。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
 
 起動コマンド自体は`node dist/mcp.mjs`です。手動実行時に何も表示されず待つのはstdio通信待ちであり、ブラウザーで開くURLはありません。通常は手動で別起動せず、MCPクライアントに起動させます。
 

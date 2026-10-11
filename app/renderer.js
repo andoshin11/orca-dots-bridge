@@ -179,6 +179,44 @@ $("openAtLogin").addEventListener("change", async (event) =>
 for (const button of document.querySelectorAll("[data-open]"))
   button.addEventListener("click", () => window.bridge.open(button.dataset.open));
 
+// 操作の記録: rows come formatted from the main process; text only, never HTML.
+async function renderAudit() {
+  const response = await window.bridge.auditLog();
+  const rows = Array.isArray(response?.rows) ? response.rows : [];
+  $("audit").replaceChildren(
+    ...rows.map((row) => {
+      const tr = document.createElement("tr");
+      const what = cell(row.tool);
+      if (row.target) {
+        const target = document.createElement("div");
+        target.className = "detail";
+        target.textContent = row.target;
+        what.append(target);
+      }
+      if (row.summary) {
+        const summary = document.createElement("div");
+        summary.className = "detail summary";
+        summary.textContent = row.summary;
+        what.append(summary);
+      }
+      tr.append(
+        cell(row.time, "detail"),
+        what,
+        cell(row.outcome, `chip ${row.outcomeClass}`),
+        cell(row.source, "detail"),
+      );
+      return tr;
+    }),
+  );
+  $("auditEmpty").hidden = rows.length > 0;
+  $("auditEmpty").textContent = response?.error
+    ? "記録を読み込めませんでした。"
+    : "まだ記録はありません。";
+  if (response?.error) $("auditEmpty").hidden = false;
+}
+$("reloadAudit").addEventListener("click", () => void renderAudit());
+void renderAudit();
+
 window.bridge.onState(render);
 void window.bridge.state().then(render);
 

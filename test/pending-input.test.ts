@@ -3,7 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, test } from "vite-plus/test";
 import { OrcaAdapter } from "../src/adapter.js";
-import { notificationSummary, parseMenu, structuredQuestions } from "../src/pending-input.js";
+import {
+  notificationSummary,
+  parseMenu,
+  pendingKind,
+  promptOpen,
+  structuredQuestions,
+} from "../src/pending-input.js";
 import { Bridge } from "../src/service.js";
 import { answerTool, callTool, pendingInputTool } from "../src/tools.js";
 
@@ -83,6 +89,14 @@ describe("parseMenu", () => {
       ],
       multiSelect: false,
       prompt: "rm -rf build\nRemove the build directory\nDo you want to proceed?",
+      context: [
+        "⏺ Bash(rm -rf build)",
+        "⎿  Running…",
+        "Bash command",
+        "rm -rf build",
+        "Remove the build directory",
+        "Do you want to proceed?",
+      ],
     });
   });
   test("reads AskUserQuestion options across descriptions and separators", () => {
@@ -113,6 +127,108 @@ describe("parseMenu", () => {
     const menu = parseMenu(multiSelect);
     expect(menu?.multiSelect).toBe(true);
     expect(menu?.options[0]).toEqual({ number: 1, label: "Lint", selected: true });
+  });
+});
+
+// Real screens (October 2026), kept verbatim apart from the workspace path.
+const codexPermissionsMenu = [
+  "  Update Model Permissions",
+  "  1. Ask for approval       Read and edit workspace files and run commands, with approval required for internet access or edits outside the workspace",
+  "  2. Approve for me         Only ask for actions detected as potentially unsafe",
+  "› 3. Full Access (current)  Use with caution: Codex can edit files outside this workspace and access the internet without approval",
+  "  4. Read Only              Read workspace files, with approval required for edits or internet access",
+  "  enter select · esc back",
+];
+const codexCommandApproval = [
+  "  Would you like to run the following command?",
+  "  Environment: local",
+  "  Reason: ネットワーク制限によりホスト名を解決できなかったため、サンドボックス外で同じコマンドを実行してよいですか？",
+  "  $ curl -sI https://example.com",
+  "› 1. Yes, proceed (y)",
+  "  2. Yes, and don't ask again for commands that start with `curl -sI https://example.com` (p)",
+  "  3. No, and tell Codex what to do differently (esc)",
+  "  Press enter to confirm or esc to cancel",
+];
+const claudeBashPermission = [
+  " Bash command",
+  " touch orca-bridge-test.txt",
+  " Do you want to proceed?",
+  " ❯ 1. Yes",
+  "   2. Yes, and always allow access to /Users/me/workspaces/dot-test-2 from this project",
+  "   3. Yes, and switch to auto mode · auto mode handles these prompts for you",
+  "   4. No",
+  " Esc to cancel · Tab to amend",
+];
+const kindOf = (agent: { state: string; toolName: string | null }, lines: string[]) =>
+  pendingKind(agent, { menu: parseMenu(lines), promptOpen: promptOpen(lines) });
+
+describe("pending kind from the visible screen", () => {
+  test("Codex's /permissions menu is a selection, even with a stale toolName", () => {
+    const menu = parseMenu(codexPermissionsMenu);
+    expect(menu?.options.map((o) => [o.number, o.selected])).toEqual([
+      [1, false],
+      [2, false],
+      [3, true],
+      [4, false],
+    ]);
+    expect(menu?.options[2]?.label).toMatch(/^Full Access \(current\)/);
+    expect(menu?.prompt).toBe("Update Model Permissions");
+    expect(kindOf({ state: "done", toolName: "Bash" }, codexPermissionsMenu)).toBe("selection");
+    expect(kindOf({ state: "waiting", toolName: "Bash" }, codexPermissionsMenu)).toBe("selection");
+    expect(kindOf({ state: "done", toolName: null }, codexPermissionsMenu)).toBe("selection");
+  });
+  test("Codex's command approval: the $ line above and the footer below are read", () => {
+    const menu = parseMenu(codexCommandApproval);
+    expect(menu?.options).toEqual([
+      { number: 1, label: "Yes, proceed (y)", selected: true },
+      {
+        number: 2,
+        label:
+          "Yes, and don't ask again for commands that start with `curl -sI https://example.com` (p)",
+        selected: false,
+      },
+      { number: 3, label: "No, and tell Codex what to do differently (esc)", selected: false },
+    ]);
+    expect(menu?.prompt).toContain("$ curl -sI https://example.com");
+    for (const agent of [
+      { state: "blocked", toolName: "exec_command" },
+      { state: "waiting", toolName: null },
+      // Orca may still report the previous turn; the visible header decides.
+      { state: "done", toolName: null },
+    ])
+      expect(kindOf(agent, codexCommandApproval)).toBe("permission");
+  });
+  test("Claude's permission prompt is permission", () => {
+    expect(parseMenu(claudeBashPermission)?.options.map((o) => o.label)).toEqual([
+      "Yes",
+      "Yes, and always allow access to /Users/me/workspaces/dot-test-2 from this project",
+      "Yes, and switch to auto mode · auto mode handles these prompts for you",
+      "No",
+    ]);
+    expect(kindOf({ state: "blocked", toolName: "Bash" }, claudeBashPermission)).toBe("permission");
+    expect(kindOf({ state: "blocked", toolName: "Bash" }, claudePermission)).toBe("permission");
+  });
+  test("approval-shaped options without a header count only for a waiting agent with a tool", () => {
+    const bare = ["❯ 1. Yes", "  2. No"];
+    expect(kindOf({ state: "blocked", toolName: "Bash" }, bare)).toBe("permission");
+    expect(kindOf({ state: "done", toolName: "Bash" }, bare)).toBe("selection");
+    expect(kindOf({ state: "blocked", toolName: null }, bare)).toBe("selection");
+  });
+  test("AskUserQuestion menus are questions, by tool or by their shape", () => {
+    expect(kindOf({ state: "waiting", toolName: "AskUserQuestion" }, claudeQuestion)).toBe(
+      "question",
+    );
+    expect(kindOf({ state: "waiting", toolName: null }, claudeQuestion)).toBe("question");
+    // A stale question tool on a finished agent does not make a menu a question.
+    expect(kindOf({ state: "done", toolName: "AskUserQuestion" }, ["❯ 1. a", "  2. b"])).toBe(
+      "selection",
+    );
+  });
+  test("no menu: free input with an open composer, otherwise unknown", () => {
+    expect(kindOf({ state: "done", toolName: "Bash" }, idlePrompt)).toBe("free_input");
+    expect(kindOf({ state: "waiting", toolName: null }, ["working…"])).toBe("unknown");
+    expect(pendingKind({ state: "blocked", toolName: "Bash" })).toBe("permission");
+    expect(pendingKind({ state: "done", toolName: "Bash" })).toBe("unknown");
   });
 });
 
@@ -286,6 +402,21 @@ describe("orca_pending_input", () => {
       menuVisible: false,
       options: [],
       screenTail: "Thinking about it…\nstill going",
+    });
+  });
+  test("a finished agent's settings menu is a selection without its stale tool", async () => {
+    const f = fixture({
+      screens: [codexPermissionsMenu],
+      agent: { ...waitingAgent, state: "done", agentType: "codex" },
+    });
+    expect((await f.bridge.pendingInput(answer)).items[0]).toMatchObject({
+      state: "done",
+      kind: "selection",
+      toolName: null,
+      toolInput: null,
+      menuVisible: true,
+      menuPrompt: "Update Model Permissions",
+      options: [{ number: 1 }, { number: 2 }, { number: 3, selected: true }, { number: 4 }],
     });
   });
   test("an open composer is free input", async () => {

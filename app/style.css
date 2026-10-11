@@ -101,6 +101,20 @@ td.detail {
 .chip.skipped {
   color: var(--muted);
 }
+.chip.refused {
+  color: var(--action);
+}
+table.audit td:first-child {
+  white-space: nowrap;
+}
+table.audit div.detail {
+  color: var(--muted);
+  word-break: break-all;
+  font-size: 12px;
+}
+table.audit div.summary {
+  white-space: pre-wrap;
+}
 ol.setup {
   padding-left: 20px;
   margin: 8px 0 0;

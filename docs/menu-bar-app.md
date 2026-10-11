@@ -12,6 +12,7 @@ Homebrew では `brew install --cask andoshin11/tap/orca-dots-bridge` で入り�
 - 画面の手順に沿って、Tunnel ID の貼り付け → runtime キーのコピー →「セットアップを実行」→ ChatGPT のプラグイン作成（1 つ）→（任意）Orca に Agent Status Relay を入れる、と進めます。Tunnel もプラグインも 1 つです。通知を受け取るかどうかは、アプリではなく ChatGPT のプラグイン設定「通知を受け取る」で切り替えます。Agent Status Relay は、Orca の「設定」→「プラグイン」→「ソースを管理」で Git のソース `https://github.com/andoshin11/orca-plugins`（ref は `main`）を追加し、インストールして「プラグインを有効にする」を押します（権限は events:subscribe）。Platform・ChatGPT の該当ページはボタンで開けます。各手順には、押す場所に赤枠を付けた Platform・ChatGPT 画面のスクリーンショット（`app/images/`、ID などの識別子は塗りつぶし済み）を載せています。画像を押すと拡大します。
 - runtime キーはクリップボードから main プロセスが直接読み、保存できたらクリップボードを空にします。画面（renderer）にはキーを渡しません。クリップボードの中身が runtime キーの形式でなければ、読み取りも消去もしません。
 - 送信や通知の許可などの設定は、このアプリではなくChatGPTのプラグイン管理画面で行います（[ChatGPT（dot）から使う](chatgpt-tunnel.md)の「指示の送信を許可」、[自動通知](notifications.md)の「通知を受け取る」）。アプリが受け持つのは、Tunnelができる前の初回準備と、Tunnelが止まっていないかの表示です。
+- **操作の記録:** dot（ChatGPT）や stdio の MCP クライアントが bridge に頼んだ書き込み操作（指示の送信・回答・ワークスペースの作成・タスクの開始・エージェントの終了・ワークスペースの削除・呼び名の登録と削除・設定の変更）の新しい 30 件を、時刻・操作・対象・結果（完了・拒否・エラーとそのコード）・送った文面（先頭 200 文字）・どこからか（ChatGPT か stdio）で表示します。断られた操作や失敗した操作も載ります。「再読み込み」で読み直します。記録は bridge が `~/.orca-dots-bridge/audit.log`（権限 600、1 MB ごとに `audit.log.1` へ 1 世代だけ残す）に書いたもので、アプリは main プロセスでこのファイルを読むだけです（シンボリックリンクは読みません）。画面にはファイルの決まった項目だけを文字として渡し、キーや secret は記録にも画面にも含みません。
 - 「ログイン時に起動」をオンにすると、アプリ自体もログイン時に起動します（bridge サービスと Tunnel の自動起動とは別です。どちらもアプリを起動していなくても LaunchAgent で動きます）。
 - ソースからビルドする方法は[開発](development.md)を参照してください。
 
