@@ -7,21 +7,26 @@ import {
   terminalShowSchema,
   logSchema,
   sendResultSchema,
+  createResultSchema,
+  closeResultSchema,
+  closeAllResultSchema,
+  removeResultSchema,
 } from "./contracts.js";
-export type Runner = (args: string[]) => Promise<string>;
+/** `timeout` overrides the runner's default for slow writes (creating a checkout). */
+export type Runner = (args: string[], options?: { timeout?: number }) => Promise<string>;
 export function createRunner(
   binary = process.env.ORCA_BIN || "orca",
   environment = process.env.ORCA_ENVIRONMENT,
   timeout = 10000,
   maxBytes = 8 * 1024 * 1024,
 ): Runner {
-  return (args) =>
+  return (args, options) =>
     new Promise((resolve, reject) => {
       // No shell, no arbitrary verbs or caller-provided flags. Pairing credentials never appear in argv.
       execFile(
         binary,
         [...args, ...(environment ? ["--environment", environment] : []), "--json"],
-        { timeout, maxBuffer: maxBytes, encoding: "utf8" },
+        { timeout: options?.timeout ?? timeout, maxBuffer: maxBytes, encoding: "utf8" },
         (error, stdout) => {
           if (error) {
             const code = (error as NodeJS.ErrnoException).code;
@@ -99,8 +104,10 @@ export function unwrap(raw: string): unknown {
 }
 export class OrcaAdapter {
   constructor(private run: Runner = createRunner()) {}
-  private async read<T>(args: string[], schema: z.ZodType<T>): Promise<T> {
-    const parsed = schema.safeParse(unwrap(await this.run(args)));
+  private async read<T>(args: string[], schema: z.ZodType<T>, timeout?: number): Promise<T> {
+    const parsed = schema.safeParse(
+      unwrap(await (timeout === undefined ? this.run(args) : this.run(args, { timeout }))),
+    );
     if (!parsed.success)
       throw new BridgeError(
         "schema_changed",
@@ -140,4 +147,68 @@ export class OrcaAdapter {
       z.object({ send: sendResultSchema }),
     ).then((r) => r.send);
   }
+  /**
+   * A new independent worktree in an exact repo. Never activates the app, forces setup
+   * hooks or links issues/PRs. `--json` is appended by the runner.
+   */
+  createWorktree(input: {
+    repo: string;
+    name: string;
+    baseBranch?: string;
+    agent?: string;
+    prompt?: string;
+  }) {
+    return this.read(
+      [
+        "worktree",
+        "create",
+        "--no-parent",
+        "--setup",
+        "inherit",
+        "--repo",
+        value(`name:${input.repo}`),
+        "--name",
+        value(input.name),
+        ...(input.baseBranch === undefined ? [] : ["--base-branch", value(input.baseBranch)]),
+        ...(input.agent === undefined ? [] : ["--agent", value(input.agent)]),
+        ...(input.prompt === undefined ? [] : ["--prompt", value(input.prompt)]),
+      ],
+      createResultSchema,
+      60000,
+    );
+  }
+  closeTerminal(handle: string) {
+    return this.read(
+      ["terminal", "close", "--terminal", value(handle)],
+      closeResultSchema,
+      20000,
+    ).then((r) => r.close);
+  }
+  closeAllTerminals(worktreeId: string) {
+    return this.read(
+      ["terminal", "close", "--worktree", value(`id:${worktreeId}`), "--all"],
+      closeAllResultSchema,
+      30000,
+    );
+  }
+  /** Never `--force`, `--run-hooks` or a failed-hook waiver: Orca's own refusals stand. */
+  removeWorktree(worktreeId: string) {
+    return this.read(
+      ["worktree", "rm", "--worktree", value(`id:${worktreeId}`)],
+      removeResultSchema,
+      60000,
+    );
+  }
+}
+
+/** Defense in depth for write commands: a value is bounded and never reads as a flag. */
+function value(text: string) {
+  if (
+    text.length === 0 ||
+    Buffer.byteLength(text, "utf8") > 16000 ||
+    text.trimStart().startsWith("-") ||
+    text.includes("\0")
+  )
+    throw new BridgeError("invalid_input", "Invalid arguments or out-of-range limit/cursor.");
+  return text;
 }

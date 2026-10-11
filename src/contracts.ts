@@ -28,6 +28,11 @@ export const worktreeSchema = z.object({
   lastOutputAt: timestamp,
   linkedPR: z.object({ number: z.number().int(), state: text }).nullable().optional(),
   agents: z.array(agentSchema).max(10000),
+  // Read by orca_remove_workspace's preflight; optional so older runtimes still parse.
+  isMainWorktree: z.boolean().optional(),
+  workspaceKind: text.optional(),
+  liveTerminalCount: z.number().int().nonnegative().optional(),
+  hasAttachedPty: z.boolean().optional(),
 });
 export const terminalSchema = z.object({
   handle: text,
@@ -83,3 +88,46 @@ export const sendResultSchema = z.object({
     })
     .optional(),
 });
+
+// Write receipts. Only the fields the bridge reports are modeled; the rest pass through
+// unread. Shapes come from the Orca CLI's own handlers (`worktree create`, `terminal
+// close`, `worktree rm`) as shipped in October 2026.
+const handleRef = z.object({ handle: text }).passthrough();
+export const createResultSchema = z
+  .object({
+    worktree: z
+      .object({
+        id: text,
+        displayName: nullableText,
+        branch: nullableText,
+        path: nullableText,
+        repoId: nullableText,
+      })
+      .passthrough(),
+    // Newer runtimes return agentTerminalHandle; older ones only startupTerminal.handle.
+    agentTerminalHandle: nullableText,
+    startupTerminal: handleRef.nullish(),
+  })
+  .passthrough();
+export const closeResultSchema = z.object({
+  close: z
+    .object({
+      handle: text,
+      closeMode: nullableText,
+      ptyKilled: z.boolean().optional(),
+    })
+    .passthrough(),
+});
+export const closeAllResultSchema = z
+  .object({
+    closed: z.number().int().nonnegative().optional(),
+    stopped: z.number().int().nonnegative().optional(),
+  })
+  .passthrough();
+export const removeResultSchema = z
+  .object({
+    removed: z.boolean(),
+    removing: z.boolean().optional(),
+    preservedBranch: z.object({ branchName: text }).passthrough().nullish(),
+  })
+  .passthrough();

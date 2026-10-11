@@ -198,6 +198,19 @@ ORCA_BRIDGE_ENABLE_SEND=1 node dist/mcp.mjs
 
 送信は公式CLI契約と合成fixtureによるテストで検証しています。**実エージェントへの試験送信は行っていません。** 読み取り用のverify:localもsendを呼びません。
 
+## ワークスペースの作成・エージェントの終了・ワークスペースの削除（MCPのみ）
+
+`orca_create_workspace`・`orca_close_agent`・`orca_remove_workspace` はMCPのツールだけで、CLIのコマンドはありません。stdioのbridgeでは、`ORCA_BRIDGE_TOOLSET=full`（既定）でサーバー起動環境に `ORCA_BRIDGE_ENABLE_WORKSPACE=1` を明示したときだけ登録します（`ORCA_BRIDGE_STATUS_ONLY=1` や `status-send` では登録しません）。`ORCA_BRIDGE_CHATGPT_SETTINGS=1` も指定すると、ChatGPTのプラグイン設定（「ワークスペースの作成を許可」「エージェントの終了を許可」「ワークスペースの削除を許可」、既定はオフ）を呼ばれるたびに読み直して判定します。
+
+```sh
+ORCA_BRIDGE_ENABLE_WORKSPACE=1 node dist/mcp.mjs
+```
+
+- `orca_create_workspace`（`repo`・`name` 必須、`baseBranch`・`agent`・`prompt` 任意）は `worktree create --no-parent --setup inherit --repo name:<repo> --name <name> ...` を1回だけ実行し、`worktreeId` と、Orcaが返せば起動したエージェントの `terminalHandle` を返します。起動したエージェントはこのMac上でOrcaの通常の権限で動きます。readOnlyHint=false、destructiveHint=false、idempotentHint=false です。
+- `orca_close_agent` は `handle` と `expectedWorktreeId`（直前の `terminal show` で一致を確認）、または `allInWorkspace: true` と `worktreeId` を受け、`terminal close` を1回だけ実行します。ワークスペースとファイルは残ります。destructiveHint=true です。
+- `orca_remove_workspace` は完全一致の `worktreeId` だけを受け、`worktree rm --worktree id:<worktreeId>` を `--force`・`--run-hooks` なしで1回だけ実行します。メインのチェックアウト（`isMainWorktree` が `false` と明示されないもの）、開いているターミナルや作業中のエージェントが残るワークスペースは断ります。元に戻せません。destructiveHint=true です。
+- 詳しい制限とエラーコードは[ChatGPT（dot）から使う](chatgpt-tunnel.md#ワークスペースの作成エージェントの終了ワークスペースの削除)を参照してください。これらも合成fixtureによるテストだけで検証しており、実際のOrcaでの作成・削除は試していません。
+
 ## ローカルruntimeと任意のリモート接続
 
 Orca 1.4.220のローカルruntimeで、CLIとMCP SDKクライアントから4機能の実読み取りを検証しています。実測の時刻・件数・端末情報はリポジトリに含めません。同じコンピューター上で利用する場合、リモートpairingは不要です。

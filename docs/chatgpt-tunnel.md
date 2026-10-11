@@ -25,7 +25,7 @@ pbcopy < /dev/null
 - Tunnelのprofileは`~/.orca-dots-bridge/tunnel/profiles/orca-dots-bridge.yaml`です。転送先は`http://127.0.0.1:8787/mcp`で、bridgeサービスが求めるBearerを`~/.orca-dots-bridge/tunnel/service-authorization`から`file:`で付けます。
 - `--install-agent`は、bridgeサービス（LaunchAgent `dev.orca-dots-bridge.service`）とTunnel（LaunchAgent `dev.orca-dots-bridge.tunnel`）を登録します。どちらもログイン時に起動し、止まっても再起動します。Tunnelはbridgeサービスが待ち受けを始めてから起動します。出力は保存しません。
 - 以前の2つのTunnelの構成（`--status-tunnel-id`と`--notification-tunnel-id`）で準備していた場合も、`--install-agent`を付けて実行すると移行します。保存済みの状態確認用のTunnel IDをそのまま使い、古い通知サービスを止めてから新しいbridgeサービスを起動し、古い状態確認用Tunnelを止めてから新しいTunnelを起動し、最後に古い通知用Tunnelと、このコマンドが作った古いprofileを片付けます。各段階は`legacy-*`の行に表示します。`--status-tunnel-id`は`--tunnel-id`の別名として今も使えます。
-- このTunnelが公開するツールは`orca_find`（全プロジェクト・ワークスペースから、名前や状態に合うエージェントの候補を探す読み取りツール）、`orca_status`、`orca_send_instruction`（明示した1端末への追加指示）、設定画面用の`orca_settings_read`・`orca_settings_update`、通知の確認用の`orca_recent_notifications`です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます（ChatGPTが付けるメタデータで見分けており、仕様書にない実測の挙動に頼っています。詳しくは下の「ChatGPTのプラグイン設定で送信を許可する」）。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。自動通知は[自動通知](notifications.md)を参照してください。
+- このTunnelが公開するツールは`orca_find`（全プロジェクト・ワークスペースから、名前や状態に合うエージェントの候補を探す読み取りツール）、`orca_status`、`orca_send_instruction`（明示した1端末への追加指示）、`orca_create_workspace`（ワークスペースの作成と、任意でエージェントの起動）、`orca_close_agent`（エージェントのターミナルを閉じる）、`orca_remove_workspace`（ワークスペースの削除）、設定画面用の`orca_settings_read`・`orca_settings_update`、通知の確認用の`orca_recent_notifications`です。送信は、ChatGPTのプラグイン管理画面に出る設定「**指示の送信を許可**」がオンのときだけ受け付けます（既定はオフ。オフの間は呼ばれても何もせず`send_disabled`を返します）。作成・終了・削除も同じく、それぞれ「**ワークスペースの作成を許可**」「**エージェントの終了を許可**」「**ワークスペースの削除を許可**」がオンのときだけ受け付けます（既定はオフ。オフなら`create_disabled`・`close_disabled`・`remove_disabled`）。設定は`~/.orca-dots-bridge/chatgpt-settings.json`（権限600）に保存され、送信のたびに読み直します。オンにする変更は、プラグイン管理画面からの操作だけを受け付けます（ChatGPTが付けるメタデータで見分けており、仕様書にない実測の挙動に頼っています。詳しくは下の「ChatGPTのプラグイン設定で送信を許可する」）。チャットの中でAIに頼んでもオンにはなりません（オフにする変更はどちらからでも受け付けます）。ChatGPTアカウントを操作できる人なら誰でも切り替えられる点は、個人利用の前提として許容しています。設定画面はOpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)（`openai/settings`）で表示しています。自動通知は[自動通知](notifications.md)を参照してください。
 - `setup`でprofileが変わったあとや移行のあとは、ChatGPTでプラグインの管理画面を開き「ツールを更新」を1回押してください。
 - 状態の確認だけなら`node dist/setup.mjs doctor`です。何も書き込みません。最後に、まだ人がやることを表示します。
 
@@ -115,12 +115,27 @@ ORCA_BRIDGE_TOOLSET=status-send ORCA_BRIDGE_ENABLE_SEND=1 ORCA_BRIDGE_CHATGPT_SE
 
 bridgeサービス、または`ORCA_BRIDGE_CHATGPT_SETTINGS=1`のstdioのbridgeは、OpenAIの[MCP Extensions](https://github.com/openai/mcp-extensions/blob/main/docs/spec.md)にあるstructured settings（`openai/settings`）を宣言します。ChatGPTはプラグイン管理画面に設定欄を表示し、設定用の2つのツール（`orca_settings_read` / `orca_settings_update`）で値を読み書きします。
 
-- **設定項目:** 「指示の送信を許可」（`sendEnabled`）と「通知を受け取る」（`notificationsEnabled`、[自動通知](notifications.md)）です。どちらも既定はオフです。
+- **設定項目:** 「Orca への操作」グループに「指示の送信を許可」（`sendEnabled`）と「エージェントの終了を許可」（`closeEnabled`）、「ワークスペース」グループに「ワークスペースの作成を許可」（`createEnabled`）と「ワークスペースの削除を許可」（`removeEnabled`）、「通知」グループに「通知を受け取る」（`notificationsEnabled`、[自動通知](notifications.md)）です。どれも既定はオフです。作成で起動したエージェントはこのMac上でOrcaの通常の権限で動き、削除は元に戻せないため、必要なものだけをオンにしてください。
 - **保存先:** `~/.orca-dots-bridge/chatgpt-settings.json`（権限600）です。ファイルが無い・壊れている・値が`true`以外の場合はオフとして扱います。
 - **送信時の判定:** `orca_send_instruction`は呼ばれるたびに設定を読み直し、オフなら`send_disabled`を返してOrcaに触れません。オンでも、下の節と同じ対象検証を行います。
+- **作成・終了・削除の判定:** 3つのツールも呼ばれるたびにそれぞれの設定を読み直し、オフならOrcaに触れません。オンのときの動作は下の「ワークスペースの作成・エージェントの終了・ワークスペースの削除」を参照してください。
 - **オンにできる場所:** プラグイン管理画面からの操作だけです。ChatGPTが設定画面からの呼び出しに付ける`_meta`（`openai/action_name`があり、`openai/session`が無い）で見分けます。チャットの中でAIが設定ツールを呼んでも、オンにする変更は`settings_page_only`で拒否します。オフにする変更はどちらからでも受け付けます。
 - **前提と限界:** この見分け方は2026年10月に実測した挙動で、仕様書には書かれていません。ChatGPT側が変わった場合は「オンにできなくなる」側に倒れます。仕様書にある`_meta.ui.visibility: ["app"]`（AIから隠す指定）は、設定画面からもツールが見えなくなったため使っていません。ChatGPTアカウントを操作できる人なら誰でも送信を許可できる点は、個人利用の前提として許容しています。
 - **ツールの更新:** profileを変えたあとは、ChatGPTのプラグイン管理画面で「ツールを更新」を1回押します。
+
+## ワークスペースの作成・エージェントの終了・ワークスペースの削除
+
+どれも利用者がはっきり頼んだときだけ使うツールで、dotは実行前に対象と内容を利用者に確認します。Orca CLIはshellを通さず、固定の引数で呼びます（`--json`は自動で付きます）。
+
+| ツール                  | Orca CLI                                                                                                                              | 主な制限                                                                                                                                                                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `orca_create_workspace` | `worktree create --no-parent --setup inherit --repo name:<repo> --name <name> [--base-branch <ref>] [--agent <id>] [--prompt <text>]` | `--activate`・`--run-hooks`・issue/PRの紐付けは渡さない。名前は英数字と`.`・`_`・`-`の100文字まで。promptは16000文字までで、agentの指定が必要。結果が分からないときは`create_outcome_unknown`を返し、再実行しない                    |
+| `orca_close_agent`      | `terminal close --terminal <handle>`、または `terminal close --worktree id:<worktreeId> --all`                                        | 1端末のときは直前の`terminal show`でhandleが`expectedWorktreeId`のワークスペースにあることを確かめる（違えば`target_mismatch`）。ワークスペースとファイルは残る                                                                      |
+| `orca_remove_workspace` | `worktree rm --worktree id:<worktreeId>`                                                                                              | 完全一致の`worktreeId`だけ。`--force`・`--run-hooks`は渡さない。メインのチェックアウトは削除しない。開いているターミナルや作業中のエージェントがあれば`close_agents_first`。コミットしていない変更などでOrcaが断れば`remove_refused` |
+
+- **メインのチェックアウトの判定:** `orca worktree ps`の`isMainWorktree`が`false`と明示され、かつ`workspaceKind`が`git`（または項目なし）のときだけ削除の対象にします。`isMainWorktree`が`true`のとき、項目が無い古いOrcaのとき、フォルダのワークスペースのときは`remove_refused`で断ります。null parentはメインの根拠にしません。
+- **削除で消えるもの:** チェックアウトのディレクトリと、Orcaがマージ済みと確かめられたローカルブランチです。元に戻せません。
+- **stdioのbridge:** `ORCA_BRIDGE_TOOLSET=full`（既定）で`ORCA_BRIDGE_ENABLE_WORKSPACE=1`を明示したときだけ3つを登録します。`ORCA_BRIDGE_STATUS_ONLY=1`や`status-send`では登録しません。`ORCA_BRIDGE_CHATGPT_SETTINGS=1`も指定すると、上の設定でも判定します。
 
 ## Tunnelでstatusと単一送信だけを公開する（手作業・明示承認後）
 

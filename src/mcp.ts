@@ -12,10 +12,12 @@ import {
   settingsToolDefinitions,
   statusTool,
   textResult,
+  workspaceToolDefinitions,
   type ToolDefinition,
 } from "./tools.js";
 // Opt-in: settings on the ChatGPT plugin page (OpenAI MCP Extensions). When on,
-// sending also requires the 指示の送信を許可 setting, checked on every call.
+// sending also requires the 指示の送信を許可 setting, and each workspace write its own
+// setting, checked on every call.
 const chatgptSettings = process.env.ORCA_BRIDGE_CHATGPT_SETTINGS === "1";
 const server = new McpServer(
   { name: "orca-dots-bridge", version: "0.1.0" },
@@ -30,6 +32,9 @@ if (!["full", "status-send"].includes(toolset)) {
   throw new Error("Invalid ORCA_BRIDGE_TOOLSET; server was not started.");
 }
 const sendEnabled = !statusOnly && process.env.ORCA_BRIDGE_ENABLE_SEND === "1";
+// Creating, closing and removing workspaces: a separate explicit opt-in, full toolset only.
+const workspaceEnabled =
+  !statusOnly && toolset === "full" && process.env.ORCA_BRIDGE_ENABLE_WORKSPACE === "1";
 const register = (def: ToolDefinition) =>
   server.registerTool(
     def.name,
@@ -108,6 +113,12 @@ if (sendEnabled)
       ...(chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {}),
     }),
   );
+if (workspaceEnabled)
+  for (const def of workspaceToolDefinitions(
+    bridge,
+    chatgptSettings ? { settingsPath: chatgptSettingsPath() } : {},
+  ))
+    register(def);
 if (chatgptSettings)
   for (const def of settingsToolDefinitions(chatgptSettingsPath())) register(def);
 await server.connect(new StdioServerTransport());
