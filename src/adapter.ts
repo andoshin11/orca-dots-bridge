@@ -141,6 +141,25 @@ export class OrcaAdapter {
       z.object({ terminal: logSchema }),
     ).then((r) => r.terminal);
   }
+  /** The rendered screen's last `limit` rows (`--screen`): what a TUI shows right now. */
+  screen(handle: string, limit: number) {
+    return this.read(
+      ["terminal", "read", "--terminal", handle, "--screen", "--limit", String(limit)],
+      z.object({ terminal: logSchema }),
+    ).then((r) => r.terminal);
+  }
+  /**
+   * Types keys without Enter, written raw (no bracketed paste) by Orca: a menu digit.
+   * Only a single menu digit is accepted here.
+   */
+  keys(handle: string, keys: string) {
+    if (!/^[1-9]$/.test(keys))
+      throw new BridgeError("invalid_input", "Invalid arguments or out-of-range limit/cursor.");
+    return this.read(
+      ["terminal", "send", "--terminal", handle, "--text", keys],
+      z.object({ send: sendResultSchema }),
+    ).then((r) => r.send);
+  }
   send(handle: string, text: string) {
     return this.read(
       ["terminal", "send", "--terminal", handle, "--text", text, "--enter"],

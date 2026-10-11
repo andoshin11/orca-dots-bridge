@@ -23,7 +23,7 @@ const properties = {
     type: "boolean",
     title: "指示の送信を許可",
     description:
-      "オンにすると、dot から Orca のエージェント1つへ追加の指示を送れます。送る前に ChatGPT が確認します。",
+      "オンにすると、dot から Orca のエージェント1つへ追加の指示を送ったり、エージェントの質問や承認待ちに選択肢の番号で答えたりできます。送る前に ChatGPT が確認します。",
   },
   closeEnabled: {
     type: "boolean",
