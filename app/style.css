@@ -104,8 +104,12 @@ td.detail {
 .chip.refused {
   color: var(--action);
 }
-table.audit td:first-child {
+/* Time, result and source are short labels: keep each on one line. */
+table.audit td:first-child,
+table.audit td:nth-child(3),
+table.audit td:nth-child(4) {
   white-space: nowrap;
+  word-break: normal;
 }
 table.audit div.detail {
   color: var(--muted);
