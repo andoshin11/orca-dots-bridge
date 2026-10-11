@@ -79,6 +79,7 @@ async function fixture(options: { enabled: boolean; describe?: () => Promise<Pan
         "content-type": "application/json",
         "MCP-Protocol-Version": "2026-07-28",
         "Mcp-Method": method,
+        ...(method === "tools/call" ? { "Mcp-Name": String(params.name) } : {}),
         accept: "application/json, text/event-stream",
         authorization: `Bearer ${serviceKey.toString("base64url")}`,
       },
@@ -326,4 +327,31 @@ it("rejects a handle whose pane now belongs to another worktree", async () => {
   });
   expect(reply.error).toBeDefined();
   expect(f.posts).toHaveLength(0);
+});
+
+it("lets dot read what it was notified about with orca_recent_notifications", async () => {
+  const f = await fixture({ enabled: true });
+  await f.start();
+  const listed = await f.mcp("tools/list");
+  expect(listed.result.tools.map((t: any) => t.name)).toEqual(["orca_recent_notifications"]);
+  const empty = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
+  expect(empty.result.structuredContent).toEqual({ notifications: [] });
+
+  await f.subscribe(undefined, "orca.pane_turn_finished");
+  await f.relay("done");
+  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_turn_finished"));
+  const reply = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
+  expect(reply.result.structuredContent.notifications).toEqual([
+    {
+      event: "orca.pane_turn_finished",
+      kind: "turn_finished",
+      at: expect.any(String),
+      terminalHandle: "term_1",
+      worktreeId: "wt_1",
+    },
+  ]);
+
+  await writeFile(f.settingsPath, JSON.stringify({ notificationsEnabled: false }));
+  const off = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
+  expect(off.result.structuredContent).toEqual({ notifications: [] });
 });
