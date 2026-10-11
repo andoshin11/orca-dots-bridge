@@ -39,7 +39,7 @@ flowchart LR
   orcacli -- "ローカル IPC" --> orca
 ```
 
-- bridge サービスが公開するツールは `orca_find`（名前・状態からの候補探し）、`orca_status`、`orca_pending_input`（入力待ちの質問・承認内容と、画面に表示されている選択肢）、`orca_send_instruction`・`orca_answer`（どちらも `expectedWorktreeId` 必須。`orca_answer` は番号付きメニューが表示されているときだけその番号を送る）、`orca_create_workspace`・`orca_close_agent`・`orca_remove_workspace`（ワークスペースの作成・エージェントの終了・ワークスペースの削除）、`orca_settings_read` / `orca_settings_update`（ChatGPT の設定画面用、OpenAI MCP Extensions の `openai/settings`）、`orca_recent_notifications` です。あわせて MCP Events（`orca.pane_turn_finished`・`orca.pane_input_required`）を提供します。
+- bridge サービスが公開するツールは `orca_brief`（全体の様子の要約。`worktree ps` と `terminal list` を 1 回ずつ読むだけ）、`orca_find`（名前・状態からの候補探し。聞き間違いに強い一致と呼び名）、`orca_status`、`orca_pending_input`（入力待ちの質問・承認内容と、画面に表示されている選択肢）、`orca_send_instruction`・`orca_answer`（どちらも `expectedWorktreeId` 必須。`orca_answer` は番号付きメニューが表示されているときだけその番号を送る）、`orca_create_workspace`・`orca_close_agent`・`orca_remove_workspace`（ワークスペースの作成・エージェントの終了・ワークスペースの削除）、`orca_settings_read` / `orca_settings_update`（ChatGPT の設定画面用、OpenAI MCP Extensions の `openai/settings`）、`orca_recent_notifications`、`orca_set_alias`・`orca_remove_alias`（ワークスペースの呼び名。`~/.orca-dots-bridge/aliases.json` に保存するだけで Orca には触れない）です。あわせて MCP Events（`orca.pane_turn_finished`・`orca.pane_input_required`。1 つのペイン、または全体・リポジトリ・ワークスペース単位の購読）を提供します。
 - 状態確認はいつでも使えます。指示の送信は ChatGPT のプラグイン設定「指示の送信を許可」、ワークスペースの作成・エージェントの終了・ワークスペースの削除はそれぞれ「ワークスペースの作成を許可」「エージェントの終了を許可」「ワークスペースの削除を許可」、通知は「通知を受け取る」がオンのときだけ受け付けます（どれも既定はオフで、呼ばれるたびに設定を読み直します。オンにする変更はプラグイン管理画面からだけ受け付けます）。
 - 指示の送信は、確認済みの terminal handle 1 つへの `orca terminal send` 1 回だけです。
 - ワークスペースの作成は `orca worktree create --no-parent --setup inherit --repo name:<repo> --name <name> [--base-branch] [--agent] [--prompt]` 1 回だけです（`--activate`・`--run-hooks`・issue/PR の紐付けは渡しません）。
@@ -68,7 +68,7 @@ flowchart LR
 状態確認と明示的な指示送信とは別に、ターン終了・入力待ちの自動通知を提供します。経路は次のとおりです。
 
 - **セッション単位（`orca.session_activity`）:** 専用RPCを追加したOrcaが必要な経路で、二段階試験の入口からだけ使えました。試験用の入口とともに削除しました（記録は[通知実装・検証範囲](notifications-design.md)と[通知試験のMac mini移行手順](archive/mac-mini-migration.md)）。
-- **ペイン単位（`orca.pane_turn_finished`・`orca.pane_input_required`）:** 通常版のOrcaに、Orca の experimental plugin Agent Status Relay（[orca-plugins](https://github.com/andoshin11/orca-plugins) から入れます）を入れて使います。同じペインで始まった別のセッションの区別と、取りこぼしの検出はできません。2026-10-11に、ターン終了と入力待ちの両方がdotに届き、dotが `orca_recent_notifications` で種類を確かめて報告することを確認しました（dotには通知の中身が渡らないため）。準備と制約は[自動通知](notifications.md)を参照してください。
+- **ペイン単位（`orca.pane_turn_finished`・`orca.pane_input_required`）:** 通常版のOrcaに、Orca の experimental plugin Agent Status Relay（[orca-plugins](https://github.com/andoshin11/orca-plugins) から入れます）を入れて使います。同じペインで始まった別のセッションの区別と、取りこぼしの検出はできません。全体・リポジトリ・ワークスペース単位でまとめて購読することもでき、その場合はイベントごとに、届いたペインのワークスペースとリポジトリを Orca CLI の一覧（最大 10 秒キャッシュ）で調べて振り分けます。2026-10-11に、ターン終了と入力待ちの両方がdotに届き、dotが `orca_recent_notifications` で種類を確かめて報告することを確認しました（dotには通知の中身が渡らないため）。準備と制約は[自動通知](notifications.md)を参照してください。
 
 ## 実装状況
 

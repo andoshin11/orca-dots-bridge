@@ -47,7 +47,7 @@ const properties = {
     type: "boolean",
     title: "通知を受け取る",
     description:
-      "オンにすると、dot に頼んだ Orca のペインのターン終了・入力待ちを通知します（Orca で Agent Status Relay プラグインを有効にしておく必要があります）。オフにすると購読をすべて止めます。",
+      "オンにすると、dot に頼んだ Orca のペイン（またはリポジトリ・ワークスペース・全体）のターン終了・入力待ちを通知します（Orca で Agent Status Relay プラグインを有効にしておく必要があります）。オフにすると購読をすべて止めます。",
   },
 } as const;
 export type SettingKey = keyof typeof properties;

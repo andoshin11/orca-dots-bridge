@@ -22,6 +22,29 @@ export const paneTargetSchema = z
   .strict();
 export type PaneTarget = z.infer<typeof paneTargetSchema>;
 /**
+ * Many panes at once: every local pane, every pane of one repo (exact name), or every
+ * pane of one worktree. Membership is decided per event, so panes and workspaces created
+ * after subscribing are included.
+ */
+export const scopeTargetSchema = z.union([
+  z.object({ scope: z.literal("all") }).strict(),
+  z.object({ scope: z.literal("repo"), repo: identity.refine((s) => s.length <= 200) }).strict(),
+  z.object({ scope: z.literal("worktree"), worktreeId: identity }).strict(),
+]);
+export type ScopeTarget = z.infer<typeof scopeTargetSchema>;
+/** Scope subscriptions exist for the single-kind events only. */
+export const scopeEventNames = ["orca.pane_turn_finished", "orca.pane_input_required"] as const;
+export const isScopeEventName = (name: string) =>
+  (scopeEventNames as readonly string[]).includes(name);
+/** Which pane a scope event came from, as far as the inventory could tell. */
+export type PaneInfo = {
+  paneKey: string;
+  worktreeId: string;
+  repo: string | null;
+  workspace: string | null;
+  terminalHandle: string | null;
+};
+/**
  * Pane-scoped event names. `orca.pane_activity` carries every kind; the other two carry
  * one kind each (plus monitoring interruptions), so a subscriber that only sees the event
  * name still knows what happened.

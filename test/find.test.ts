@@ -1,5 +1,9 @@
+import { mkdtemp } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test } from "vite-plus/test";
 import { OrcaAdapter } from "../src/adapter.js";
+import { AliasStore } from "../src/aliases.js";
 import { Bridge, queryTokens } from "../src/service.js";
 
 const now = 10_000_000;
@@ -198,4 +202,56 @@ test("rejects unknown or out-of-range arguments", async () => {
   ])
     await expect(bridge.find(input)).rejects.toMatchObject({ code: "invalid_input" });
   expect(calls).toHaveLength(0);
+});
+
+test("tolerates speech recognition: typos, unspaced Japanese and kana", async () => {
+  const titled = {
+    ...shell,
+    agents: [
+      {
+        paneKey: "tab3:leaf3",
+        state: "working",
+        agentType: "codex",
+        taskTitle: "デバッグ用の修正",
+      },
+    ],
+  };
+  const { bridge } = fixture({ worktrees: [debug, main, titled, idle] });
+  // "bridge" said for the "birdge" workspace: still only the debug workspace wins.
+  const typo = await bridge.find({ query: "debug bridge" });
+  expect(new Set(typo.candidates.map((c) => c.worktreeId))).toEqual(new Set([debug.worktreeId]));
+  // Nothing is spelled "brigde": every bridge workspace matches fuzzily.
+  const fuzzy = await bridge.find({ query: "orca-dots-brigde" });
+  expect(fuzzy.matched).toBe(3);
+  expect(fuzzy.candidates.every((c) => c.matchedBy === "fuzzy")).toBe(true);
+  // Unspaced Japanese around Latin names.
+  const unspaced = await bridge.find({ query: "orca-dots-bridgeのdebugの様子" });
+  expect(unspaced.queryTokens).toEqual(["orca-dots-bridge", "debug", "様子"]);
+  expect(new Set(unspaced.candidates.map((c) => c.worktreeId))).toEqual(
+    new Set([debug.worktreeId]),
+  );
+  // Hiragana heard for a katakana title.
+  const kana = await bridge.find({ query: "でばっぐ" });
+  expect(kana.candidates.map((c) => [c.workspace, c.matchedBy])).toEqual([
+    ["feature-x", "substring"],
+  ]);
+  // An exact word outranks a substring of the same count.
+  const ranked = await bridge.find({ query: "main" });
+  expect(ranked.candidates[0]).toMatchObject({ workspace: "main", matchedBy: "exact" });
+});
+
+test("matches and shows saved aliases", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "find-alias-"));
+  const { bridge } = fixture();
+  bridge.aliases = new AliasStore(join(dir, "aliases.json"));
+  await bridge.aliases.set("デバッグバードジ", debug.worktreeId, now);
+  const found = await bridge.find({ query: "でばっぐばーどじ の様子" });
+  expect(found.candidates.map((c) => [c.terminalHandle ?? null, c.matchedBy, c.alias])).toEqual([
+    [null, "alias", "デバッグバードジ"],
+    ["term_debug", "alias", "デバッグバードジ"],
+  ]);
+  // Shown without a query too.
+  const all = await bridge.find({ state: "waiting" });
+  expect(all.candidates[0]).toMatchObject({ alias: "デバッグバードジ" });
+  expect(all.candidates[0]).not.toHaveProperty("matchedBy");
 });
