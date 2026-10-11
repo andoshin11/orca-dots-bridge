@@ -33,8 +33,10 @@ try {
   await client.connect(transport);
   const tools = (await client.listTools()).tools;
   assert.deepEqual(tools.map((t) => t.name).sort(), [
+    "orca_brief",
     "orca_find",
     "orca_overview",
+    "orca_pending_input",
     "orca_status",
     "orca_task_detail",
     "orca_task_logs",

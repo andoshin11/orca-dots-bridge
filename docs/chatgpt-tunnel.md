@@ -51,7 +51,7 @@ stdio 対応MCPクライアントの一般的な設定例（未登録）:
 }
 ```
 
-Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_find`、`orca_status`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り7つです。送信ツールは下記の明示有効化が必要です。
+Node と Orca は実際の絶対パスに置き換えてください。MCPの stdout はJSON-RPC専用です。既定の公開ツールは `orca_find`、`orca_brief`、`orca_status`、`orca_pending_input`、`orca_overview`、`orca_waiting`、`orca_task_detail`、`orca_task_logs`、`orca_terminal_inspect` の読み取り9つです。送信ツール（`orca_send_instruction`・`orca_answer`）と呼び名のツールは下記の明示有効化が必要です。
 
 公式資料で、ChatGPT desktop / Codex がstdio MCPに対応することを確認しました。このJSONは一般的なMCPクライアント用です。Codex向けの正確なTOML設定例は [examples/codex-mcp.toml](../examples/codex-mcp.toml) にあります（未適用）。dotは接続済みコンピューター上のタスクへ委任できるため、ローカルタスクがCLIを実行して結果を返す経路を利用できます。dotのクラウド側がローカルのMCP設定を自動継承するとは扱いません。クラウド側への接続には、下記のSecure MCP Tunnel経路を利用できます。既定のstdio入口はHTTPポートを開きません。loopback HTTPポートを開くのは、常駐のbridgeサービスだけです。Tunnel・キー・ChatGPTプラグインの設定は利用者が個別に行います。
 
