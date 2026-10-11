@@ -41,7 +41,7 @@ flowchart LR
 
 必要なもの: macOS、[Orca](https://www.onorca.dev)（CLI を登録済み）、ChatGPT のアカウントと [OpenAI Platform](https://platform.openai.com/) へのアクセス。
 
-1. **アプリを入れる。** [Releases](https://github.com/andoshin11/orca-dots-bridge/releases/latest) から `Orca-Dots-Bridge-<版>-mac-arm64.zip`（Intel Mac は `-mac-x64.zip`）をダウンロードして展開し、**Finder で**「アプリケーション」フォルダへドラッグして移してから開きます。開発者署名をしていないため、初回は「開いていません」と表示されます。「完了」を押し、「システム設定」→「プライバシーとセキュリティ」の「このまま開く」を押して、確認のダイアログで再度「このまま開く」を選び、Mac のログインパスワードを入力します（1回だけです）。
+1. **アプリを入れる。** Homebrew では `brew install --cask andoshin11/tap/orca-dots-bridge` で入ります（更新は `brew upgrade --cask orca-dots-bridge`）。手動で入れる場合は、[Releases](https://github.com/andoshin11/orca-dots-bridge/releases/latest) から `Orca-Dots-Bridge-<版>-mac-arm64.zip`（Intel Mac は `-mac-x64.zip`）をダウンロードして展開し、**Finder で**「アプリケーション」フォルダへドラッグして移してから開きます。どちらの方法でも、開発者署名をしていないため、初回は「開いていません」と表示されます。「完了」を押し、「システム設定」→「プライバシーとセキュリティ」の「このまま開く」を押して、確認のダイアログで再度「このまま開く」を選び、Mac のログインパスワードを入力します（1回だけです）。
 2. **アプリの画面に沿って準備する（初回だけ）。** 各手順に Platform・ChatGPT の画面のスクリーンショットがあります。
    1. Platform で Tunnel を作り、ID を貼り付ける
    2. Platform で runtime キー（Restricted、Tunnels の Read と Use、期限付き）を作ってコピーする
