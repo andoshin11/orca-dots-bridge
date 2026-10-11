@@ -1,6 +1,6 @@
 {
   "name": "orca-dots-bridge",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Lets ChatGPT (dot) check Orca agent status on your Mac and send one explicit instruction to one agent",
   "keywords": [
