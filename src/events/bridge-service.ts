@@ -8,6 +8,7 @@ import { Bridge } from "../service.js";
 import {
   callTool,
   defineTool,
+  findTool,
   listEntry,
   sendTool,
   settingsToolDefinitions,
@@ -27,7 +28,7 @@ import { createServiceKeyResolver } from "./service-key.js";
 import { callbackUrl, createPost, EventError, type Post } from "./webhook.js";
 
 // The always-on bridge service: the single MCP endpoint the one Tunnel forwards
-// to. It serves orca_status, orca_send_instruction (refused unless the ChatGPT
+// to. It serves orca_find, orca_status, orca_send_instruction (refused unless the ChatGPT
 // setting 指示の送信を許可 is on), the ChatGPT settings tools, and MCP Events
 // notifications. It keeps subscriptions across restarts, accepts several panes
 // and lets ChatGPT refresh subscriptions (up to a day each). Whether it may notify
@@ -42,7 +43,7 @@ const maxTtlMs = 86400000;
 // The service key never expires on its own; turning notifications off is the switch.
 const noExpiry = Date.UTC(9999, 0, 1);
 
-/** dot only sees handles and worktree IDs (from orca_status), not pane keys. */
+/** dot only sees handles and worktree IDs (from orca_find or orca_status), not pane keys. */
 const shortTargetSchema = z
   .object({
     terminalHandle: z.string().min(1).max(4096),
@@ -61,7 +62,7 @@ const shortInputSchema = {
 };
 const paneEvent = paneCatalog[0]!;
 const howToSubscribe =
-  "Pass the terminal handle and worktree ID that orca_status returned for the agent. Pane-scoped: a new agent session in the same pane is not distinguished and missed events are not detected; report a received observation, never assert it as confirmed.";
+  "Pass the terminalHandle and worktreeId that orca_find or orca_status returned for the agent. Pane-scoped: a new agent session in the same pane is not distinguished and missed events are not detected; report a received observation, never assert it as confirmed.";
 /**
  * One event per kind, so the kind is in the event name: a subscriber that does not
  * surface the payload still knows whether a turn ended or input is needed.
@@ -111,7 +112,7 @@ export type BridgeServiceOptions = {
   post?: Post;
   /** How often to check the setting and drop subscriptions when it is off. */
   sweepMs?: number;
-  /** Orca access for orca_status and orca_send_instruction (the Orca CLI from ORCA_BIN by default). */
+  /** Orca access for orca_find, orca_status and orca_send_instruction (the Orca CLI from ORCA_BIN by default). */
   bridge?: Bridge;
 };
 
@@ -298,6 +299,7 @@ export async function startBridgeService(options: BridgeServiceOptions) {
   const bridge = options.bridge ?? new Bridge();
   const definitions: ToolDefinition[] = [
     statusTool(bridge),
+    findTool(bridge),
     // Always listed; refused on every call unless 指示の送信を許可 is on.
     sendTool(bridge, { requireExpectedWorktree: true, settingsPath: options.settingsPath }),
     ...settingsToolDefinitions(options.settingsPath),

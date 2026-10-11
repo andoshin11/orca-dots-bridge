@@ -130,11 +130,21 @@ test("matching is exact; no prefix/case guesses or invalid selectors", async () 
   const invalid = fixture();
   for (const input of [
     { repo: "sample-repo" },
+    { name: "review", branch: "feature" },
+    {},
     { repo: " ", name: "review" },
     { repo: "sample-repo", name: "review", all: true },
   ])
     await expect(invalid.run(input)).rejects.toMatchObject({ code: "invalid_input" });
   expect(invalid.calls).toHaveLength(0);
+});
+test("an exact worktree id alone resolves; repo/name still narrow it", async () => {
+  const f = fixture({
+    worktrees: [workspace, { ...workspace, worktreeId: "w2", branch: "refs/heads/another" }],
+  });
+  expect(await f.run({ id: "w1" })).toMatchObject({ resolution: "resolved", task: { id: "w1" } });
+  expect(await f.run({ id: "w1", repo: "other" })).toMatchObject({ resolution: "not_found" });
+  expect(await f.run({ id: "w" })).toMatchObject({ resolution: "not_found" });
 });
 test("truncated inventory cannot establish uniqueness; truncated terminals cannot select lead", async () => {
   const f = fixture({ truncated: true });

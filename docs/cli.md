@@ -111,7 +111,7 @@ command -v orca
 }
 ```
 
-クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り6ツールが表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`は変更操作です。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
+クライアントがbridgeを起動します。ツール一覧に`orca_overview`など読み取り7ツールが表示され、`orca_overview`を呼ぶと状態が返ることを確認してください。MCPからも指示を送る場合だけ、`ORCA_BRIDGE_ENABLE_SEND`を`"1"`に変えて再接続します。追加される`orca_send_instruction`は変更操作です。なお、この設定はMCPの制限であり、手順4のCLI送信には不要です。
 
 起動コマンド自体は`node dist/mcp.mjs`です。手動実行時に何も表示されず待つのはstdio通信待ちであり、ブラウザーで開くURLはありません。通常は手動で別起動せず、MCPクライアントに起動させます。
 
@@ -120,6 +120,11 @@ command -v orca
 ## 読み取り CLI
 
 ```sh
+# 名前や状態から候補を探す（部分一致・大文字小文字を区別しない）
+node dist/cli.mjs find --query 'orca-dots-bridge debug'
+node dist/cli.mjs find --state attention --limit 5
+node dist/cli.mjs find --query 'other-app' --include-idle true
+
 # 指定タスクの進捗を1回で取得（完全一致）
 node dist/cli.mjs status --repo '<repo>' --name '<task name>' --branch '<branch>'
 
@@ -141,9 +146,20 @@ node dist/cli.mjs logs --handle '<handle>' --limit 20 --max-chars 4000 --cursor 
 
 正常時は `{ "ok": true, "result": ... }`、失敗時は `{ "ok": false, "error": { "code", "message" } }` と終了コード1を返します。エラーにはraw stderrやOrcaのエラー本文を含めません。成功時のタスク・ログ出力には機密情報が含まれ得るため、出力をコミットしないでください。`ORCA_BIN=/absolute/path/to/orca` で実行ファイルを指定できます。実行ファイル指定は運用者の信頼済み設定であり、MCP引数から変更できません。
 
+## 名前や状態から候補を探す
+
+`find` / `orca_find` は、Mac上のOrcaの全プロジェクト・ワークスペースから、エージェント（またはエージェントのない端末）を候補として一覧します。正確なrepo/nameが分からないときに最初に使います。
+
+- `query`（200文字まで）は空白区切りの語で、repo・ワークスペース名・branch・worktree id（パスを含む）・agent種別・agentのタイトルに、大文字小文字を区別せず部分一致させます。いちばん多くの語に一致した候補だけを返すので、「the」「in」のような語や、どれにも一致しない語が混ざっても絞り込みは壊れません。
+- `state` は `working`・`waiting`・`blocked`・`done`・`unknown`、または `attention`（waiting/blocked）です。
+- 既定ではエージェントか端末のあるワークツリーだけを返します。`includeIdle: true` で空のワークツリーも返します（terminalHandleなし）。
+- `limit` は1〜20（既定10）。最近の活動順に並べ、`matched`（一致した総数）と `truncated` を返します。`inventoryIncomplete` がtrue、または `hostCoverageVerified` がfalseなら、結果は一部だけの可能性があります。
+- 各候補は `repo`・`workspace`・`branch`・`worktreeId`・`terminalHandle`・`agentType`・`state`・`attention`・`lastActivityAgeSec` と、最後の応答の先頭160文字（`lastResponse`）です。ログ本文は返しません。terminal handleは `status` と同じ規則（同じワークツリーで paneKey が `tabId:leafId` に一致する端末がちょうど1つ）で対応付け、決まらないときは省きます。
+- 返った `worktreeId` は `orca_status` の `id` に（`id` だけでも指定できます）、`terminalHandle` と `worktreeId` は `orca_send_instruction`（`handle`・`expectedWorktreeId`）と通知の購読に、そのまま使えます。
+
 ## 名前を指定して素早く確認
 
-`status` / `orca_status` は一覧を新しく取得し、repoとnameの完全一致で状態を集計します。同名候補はbranch・hostId・idで絞ります。候補が曖昧なら端末を選びません。チーム端末が一意なら、その候補の短いログと待機情報を並列取得します。親情報の欠落だけではmainと判定しません。最大12agentの要約と12行・1600文字のログを返し、待機未評価件数を明示します。
+`status` / `orca_status` は一覧を新しく取得し、repoとnameの完全一致（またはworktree idの完全一致）で状態を集計します。同名候補はbranch・hostId・idで絞ります。候補が曖昧なら端末を選びません。チーム端末が一意なら、その候補の短いログと待機情報を並列取得します。親情報の欠落だけではmainと判定しません。最大12agentの要約と12行・1600文字のログを返し、待機未評価件数を明示します。
 
 呼び出し側はこの結果を受け取ったら短く回答してタスクを終了してください。[即時応答の呼び出し手順と計測範囲](quick-status.md)を参照してください。
 
@@ -174,7 +190,7 @@ node dist/cli.mjs send --handle '<terminal handle>' --text '追加で確認し�
 
 呼び出し側は送信を短い単独タスクとして実行し、receiptを得たら直ちに受付結果を返してそのタスクを終了してください。性能調査・ログ追加取得・相手の完了待ちを同じ返信の前に続けないでください。CLIが返した時刻と、dot/音声へ通知できた時刻は別です。後続作業は受付結果を伝えた後の別依頼として行います。これはタスクの結果通知待ちによる遅れを減らす呼び出し方で、ブリッジが音声通知したことを保証するものではありません。
 
-MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り6ツールだけを許可します。
+MCPで送信も利用する場合のみ、サーバー起動環境に `ORCA_BRIDGE_ENABLE_SEND=1` を設定します。追加される `orca_send_instruction` はreadOnlyHint=false、idempotentHint=falseの変更ツールです。クライアントのenabled_toolsを使う場合は同名も追加してください。既定の設定例は読み取り7ツールだけを許可します。
 
 ```sh
 ORCA_BRIDGE_ENABLE_SEND=1 node dist/mcp.mjs

@@ -423,12 +423,28 @@ it("serves every tool of the one plugin and advertises the ChatGPT settings", as
   const tools = Object.fromEntries(listed.result.tools.map((t: any) => [t.name, t]));
   expect(Object.keys(tools)).toEqual([
     "orca_status",
+    "orca_find",
     "orca_send_instruction",
     "orca_settings_read",
     "orca_settings_update",
     "orca_recent_notifications",
   ]);
-  expect(tools.orca_status.inputSchema.required).toEqual(["repo", "name"]);
+  // Exact repo + name or the exact worktree id alone; checked by the handler.
+  expect(tools.orca_status.inputSchema.required).toBeUndefined();
+  expect(tools.orca_status.description).toContain("orca_find");
+  expect(tools.orca_find.annotations).toEqual({
+    readOnlyHint: true,
+    destructiveHint: false,
+    idempotentHint: true,
+    openWorldHint: true,
+  });
+  expect(tools.orca_find.inputSchema.additionalProperties).toBe(false);
+  expect(Object.keys(tools.orca_find.inputSchema.properties)).toEqual([
+    "query",
+    "state",
+    "includeIdle",
+    "limit",
+  ]);
   // status-send shape: the expected worktree is required.
   expect(tools.orca_send_instruction.inputSchema.required).toEqual([
     "expectedWorktreeId",
@@ -462,6 +478,26 @@ it("answers orca_status through the Orca CLI and returns handler failures as too
   const invalid = await f.mcp("tools/call", { name: "orca_status", arguments: { repo: "" } });
   expect(invalid.result.isError).toBe(true);
   expect(JSON.parse(invalid.result.content[0].text).error.code).toBe("invalid_input");
+});
+
+it("answers orca_find without exact names and points subscriptions at it", async () => {
+  const orca = fakeOrca();
+  const f = await fixture({ enabled: false, bridge: orca.bridge });
+  await f.start();
+  const reply = await f.mcp("tools/call", {
+    name: "orca_find",
+    arguments: { query: "debug birdge", state: "attention" },
+  });
+  expect(reply.result.isError).toBeUndefined();
+  expect(JSON.parse(reply.result.content[0].text)).toMatchObject({
+    matched: 0,
+    truncated: false,
+    candidates: [],
+    queryTokens: ["debug", "birdge"],
+  });
+  const invalid = await f.mcp("tools/call", { name: "orca_find", arguments: { limit: 21 } });
+  expect(JSON.parse(invalid.result.content[0].text).error.code).toBe("invalid_input");
+  for (const event of serviceCatalog) expect(event.description).toContain("orca_find");
 });
 
 it("refuses orca_send_instruction until 指示の送信を許可 is on", async () => {

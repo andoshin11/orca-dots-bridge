@@ -3,7 +3,7 @@ import { BridgeError, errorResult } from "./errors.js";
 const [command, ...args] = process.argv.slice(2);
 if (command === "--help" || command === "help" || !command) {
   console.log(
-    "orca-dots-bridge <status|overview|waiting|detail|logs|inspect|send|pane-target> [--repo REPO --name NAME] [--branch BRANCH] [--host-id HOST] [--limit N] [--cursor C] [--id WORKTREE_ID] [--handle TERMINAL_HANDLE] [--max-chars N] [--text TEXT] [--expected-worktree-id ID]\nJSON output. Set ORCA_BIN and optionally ORCA_ENVIRONMENT. send requires an explicit terminal handle and nonempty text. pane-target --handle prints the pane notification target and its targetHash. No automatic runtime startup.",
+    "orca-dots-bridge <find|status|overview|waiting|detail|logs|inspect|send|pane-target> [--query WORDS] [--state STATE] [--include-idle true|false] [--repo REPO --name NAME] [--branch BRANCH] [--host-id HOST] [--limit N] [--cursor C] [--id WORKTREE_ID] [--handle TERMINAL_HANDLE] [--max-chars N] [--text TEXT] [--expected-worktree-id ID]\nJSON output. Set ORCA_BIN and optionally ORCA_ENVIRONMENT. send requires an explicit terminal handle and nonempty text. pane-target --handle prints the pane notification target and its targetHash. No automatic runtime startup.",
   );
 } else if (command === "pane-target") {
   try {
@@ -34,6 +34,9 @@ if (command === "--help" || command === "help" || !command) {
         !key ||
         !value ||
         ![
+          "--query",
+          "--state",
+          "--include-idle",
           "--repo",
           "--name",
           "--branch",
@@ -55,16 +58,34 @@ if (command === "--help" || command === "help" || !command) {
             ? "maxChars"
             : key === "--expected-worktree-id"
               ? "expectedWorktreeId"
-              : key.slice(2);
+              : key === "--include-idle"
+                ? "includeIdle"
+                : key.slice(2);
       if (name in options) throw new BridgeError("invalid_input", "Duplicate flag.");
-      options[name] = ["limit", "maxChars"].includes(name) ? Number(value) : value;
+      options[name] = ["limit", "maxChars"].includes(name)
+        ? Number(value)
+        : name === "includeIdle" && ["true", "false"].includes(value)
+          ? value === "true"
+          : value;
     }
     const bridge = new Bridge();
-    if (!["status", "overview", "waiting", "detail", "logs", "inspect", "send"].includes(command))
+    if (
+      !["find", "status", "overview", "waiting", "detail", "logs", "inspect", "send"].includes(
+        command,
+      )
+    )
       throw new BridgeError("invalid_input", "Unknown command.");
     const result =
       await bridge[
-        command as "status" | "overview" | "waiting" | "detail" | "logs" | "inspect" | "send"
+        command as
+          | "find"
+          | "status"
+          | "overview"
+          | "waiting"
+          | "detail"
+          | "logs"
+          | "inspect"
+          | "send"
       ](options);
     console.log(serialize({ ok: true, result }));
   } catch (e) {

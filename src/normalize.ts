@@ -47,3 +47,18 @@ export function normalizeWorktree(w: Worktree, now = Date.now()) {
     agentsTruncated: w.agents.length > 20,
   };
 }
+/**
+ * The terminal running an agent: same worktree and the agent's paneKey equals the
+ * terminal's `tabId:leafId`. Returns nothing unless exactly one terminal matches,
+ * so callers never guess a handle.
+ */
+export function agentTerminal<T extends { worktreeId: string; tabId: string; leafId: string }>(
+  terminals: readonly T[],
+  worktreeId: string,
+  paneKey: string,
+): T | undefined {
+  const matches = terminals.filter(
+    (t) => t.worktreeId === worktreeId && `${t.tabId}:${t.leafId}` === paneKey,
+  );
+  return matches.length === 1 ? matches[0] : undefined;
+}

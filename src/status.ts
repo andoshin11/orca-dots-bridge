@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { OrcaAdapter } from "./adapter.js";
 import { BridgeError, errorResult } from "./errors.js";
-import { clip, normalizeAgent } from "./normalize.js";
+import { agentTerminal, clip, normalizeAgent } from "./normalize.js";
 const label = z
   .string()
   .min(1)
@@ -9,8 +9,8 @@ const label = z
   .refine((s) => s.trim().length > 0 && Array.from(s).every((c) => c.charCodeAt(0) >= 32));
 export const statusSchema = z
   .object({
-    repo: label,
-    name: label,
+    repo: label.optional(),
+    name: label.optional(),
     branch: label.optional(),
     hostId: label.optional(),
     id: label.optional(),
@@ -24,10 +24,15 @@ export async function taskStatus(
   now: () => number = Date.now,
 ) {
   const parsed = statusSchema.safeParse(input);
-  if (!parsed.success)
+  // Either the exact repo and name, or the exact worktree id (unique on its own).
+  if (
+    !parsed.success ||
+    (parsed.data.id === undefined &&
+      (parsed.data.repo === undefined || parsed.data.name === undefined))
+  )
     throw new BridgeError(
       "invalid_input",
-      "status requires exact repo/name and optional branch, hostId or id.",
+      "status requires exact repo/name or an exact id, with optional branch or hostId.",
     );
   const q = parsed.data,
     startedAt = new Date(now()).toISOString(),
@@ -37,8 +42,8 @@ export async function taskStatus(
     inventoryMs = Math.round(performance.now() - start);
   const matches = ps.worktrees.filter(
     (w) =>
-      w.repo === q.repo &&
-      w.displayName === q.name &&
+      (q.repo === undefined || w.repo === q.repo) &&
+      (q.name === undefined || w.displayName === q.name) &&
       (!q.branch || w.branch === q.branch || w.branch === `refs/heads/${q.branch}`) &&
       (!q.hostId || w.hostId === q.hostId) &&
       (!q.id || w.worktreeId === q.id),
@@ -89,7 +94,7 @@ export async function taskStatus(
   const w = matches[0]!;
   const terminals = termList.terminals.filter((t) => t.worktreeId === w.worktreeId);
   const agents = w.agents.map((a) => {
-    const t = terminals.find((t) => `${t.tabId}:${t.leafId}` === a.paneKey);
+    const t = agentTerminal(terminals, w.worktreeId, a.paneKey);
     return {
       ...normalizeAgent(a, now()),
       handle: t?.handle ?? null,
