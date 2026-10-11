@@ -46,7 +46,7 @@ afterEach(async () => {
 });
 
 /** A stand-in Orca CLI: one writable agent terminal, and receipts for sends. */
-function fakeOrca() {
+function fakeOrca(options: { agents?: object[]; psFails?: boolean } = {}) {
   const calls: string[][] = [];
   const terminal = {
     handle: "term_1",
@@ -60,9 +60,22 @@ function fakeOrca() {
   const bridge = new Bridge(
     new OrcaAdapter(async (args) => {
       calls.push(args);
+      if (args[0] === "worktree" && options.psFails) throw new Error("synthetic ps failure");
+      const worktrees = options.agents
+        ? [
+            {
+              worktreeId: "wt_1",
+              repo: "repo",
+              branch: "main",
+              displayName: "ws",
+              status: "active",
+              agents: options.agents,
+            },
+          ]
+        : [];
       const result =
         args[0] === "worktree"
-          ? { worktrees: [], totalCount: 0, truncated: false }
+          ? { worktrees, totalCount: worktrees.length, truncated: false }
           : args[1] === "list"
             ? { terminals: [], totalCount: 0, truncated: false }
             : args[1] === "show"
@@ -122,7 +135,8 @@ async function fixture(options: {
         };
       },
       sweepMs: 50,
-      ...(options.bridge ? { bridge: options.bridge } : {}),
+      // Never the real Orca CLI: notification summaries read `worktree ps` after delivery.
+      bridge: options.bridge ?? fakeOrca().bridge,
     }).then((s) => {
       running.push(s);
       return s;
@@ -416,6 +430,69 @@ it("lets dot read what it was notified about with orca_recent_notifications", as
   expect(off.result.structuredContent).toEqual({ notifications: [] });
 });
 
+it("adds the agent's last message and pending tool to recent notifications", async () => {
+  const orca = fakeOrca({
+    agents: [
+      {
+        paneKey: "tab_1:leaf_1",
+        state: "blocked",
+        agentType: "claude",
+        lastAssistantMessage: "Build finished; cleaning up next.",
+        toolName: "Bash",
+        toolInput: "rm -rf build",
+      },
+    ],
+  });
+  const f = await fixture({ enabled: true, bridge: orca.bridge });
+  await f.start();
+  await f.subscribe(undefined, "orca.pane_input_required");
+  await f.relay("blocked");
+  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_input_required"));
+  let notifications: any[] = [];
+  for (let i = 0; i < 100; i++) {
+    const reply = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
+    notifications = reply.result.structuredContent.notifications;
+    if (notifications[0]?.summary) {
+      expect(reply.result.structuredContent.observation).toContain("untrusted");
+      break;
+    }
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  expect(notifications).toEqual([
+    {
+      event: "orca.pane_input_required",
+      kind: "input_required",
+      at: expect.any(String),
+      terminalHandle: "term_1",
+      worktreeId: "wt_1",
+      summary: "Build finished; cleaning up next.",
+      pending: { kind: "permission", toolName: "Bash", toolInput: "rm -rf build" },
+    },
+  ]);
+});
+
+it("delivers and lists a notification even when the summary cannot be read", async () => {
+  const orca = fakeOrca({ psFails: true });
+  const f = await fixture({ enabled: true, bridge: orca.bridge });
+  await f.start();
+  await f.subscribe(undefined, "orca.pane_turn_finished");
+  await f.relay("done");
+  await f.until(() => f.posts.some((p) => p.body.name === "orca.pane_turn_finished"));
+  await f.until(() => orca.calls.some((a) => a[0] === "worktree"));
+  const reply = await f.mcp("tools/call", { name: "orca_recent_notifications", arguments: {} });
+  expect(reply.result.structuredContent).toEqual({
+    notifications: [
+      {
+        event: "orca.pane_turn_finished",
+        kind: "turn_finished",
+        at: expect.any(String),
+        terminalHandle: "term_1",
+        worktreeId: "wt_1",
+      },
+    ],
+  });
+});
+
 it("serves every tool of the one plugin and advertises the ChatGPT settings", async () => {
   const f = await fixture({ enabled: false });
   await f.start();
@@ -424,7 +501,9 @@ it("serves every tool of the one plugin and advertises the ChatGPT settings", as
   expect(Object.keys(tools)).toEqual([
     "orca_status",
     "orca_find",
+    "orca_pending_input",
     "orca_send_instruction",
+    "orca_answer",
     "orca_create_workspace",
     "orca_close_agent",
     "orca_remove_workspace",

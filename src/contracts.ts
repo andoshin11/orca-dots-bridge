@@ -11,6 +11,8 @@ export const agentSchema = z.object({
   agentType: nullableText,
   lastAssistantMessage: nullableText,
   toolName: nullableText,
+  // Orca's one-line preview of the pending tool call (a command, a path; at most ~160 chars).
+  toolInput: nullableText,
   interrupted: z.boolean().optional(),
   stateStartedAt: timestamp,
   updatedAt: timestamp,
